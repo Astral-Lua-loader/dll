@@ -24,6 +24,8 @@ void SetValue(int slot, double v);         // any thread (a list item's state fr
 void SetState(bool open, int r, int g, int b);  // any thread: Astral's menu open, its accent (-1 unknown)
 
 void SetConfigPath(const std::wstring& path);
+float Scale();            // the size to draw at: 600/720 x Astral's render scale (alm_scale)
+void SetRenderScale(float s);  // any thread, before alm_init: Astral's "Render scale" (1 = 100%)
 void Fonts(float scale);  // after ImGui::CreateContext, before the backend builds the atlas
 void Frame();             // between NewFrame and Render
 bool WantsMouse();        // the cursor is over the menu (the window keeps those messages from the game)

@@ -214,11 +214,11 @@ void Swirl(ImDrawList* dl, ImVec2 p, float w, float h, float since, float t) {
     ID3D11ShaderResourceView* tex = SwirlTexture();
     if (!tex) return;
     const float in = ui::ease(std::clamp(since / 0.45f, 0.f, 1.f));
-    const float shown = w / static_cast<float>(kSwirlW) * kSwirlH;  // the image's height at full width
-    const float v = std::clamp(h / shown, 0.f, 1.f);                 // the slice of it that fits the header
-    const float v0 = 0.5f - v * 0.5f, slide = (1 - in) * ui::S(18);
-    dl->AddImage(reinterpret_cast<ImTextureID>(tex), ImVec2(p.x + slide, p.y), ImVec2(p.x + w + slide, p.y + h), ImVec2(0, v0),
-                 ImVec2(1, v0 + v), ui::col(ui::rgb(255, 255, 255), 0.42f * in));
+    const float tileW = h * kSwirlW / static_cast<float>(kSwirlH);  // the whole image at the header's height
+    const float slide = (1 - in) * ui::S(18);
+    for (float x = p.x - tileW * 0.18f + slide; x < p.x + w; x += tileW)
+        dl->AddImage(reinterpret_cast<ImTextureID>(tex), ImVec2(x, p.y), ImVec2(x + tileW, p.y + h), ImVec2(0, 0), ImVec2(1, 1),
+                     ui::col(ui::rgb(255, 255, 255), 0.5f * in));
 }
 
 void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop before the tabs
@@ -234,14 +234,15 @@ void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop 
     Swirl(dl, p, w, h, since, t);
     dl->PopClipRect();
     for (int i = 0; i < 15; ++i) {
-        const float r = ui::S(stars[i][2] * 1.2f);
+        const float r = ui::S(stars[i][2] * 1.05f);
+        static const float kDim[15] = {1, .55f, 1, .7f, .5f, 1, .6f, .85f, 1, .5f, .75f, 1, .6f, .9f, .55f};
         if (p.x + ui::S(stars[i][0]) + r >= starsEnd) continue;
         const ImVec2 c(p.x + ui::S(stars[i][0]), p.y + ui::S(stars[i][1]));
         // twinkle: each star on its own slow beat; at the top of it the star brightens and swells for a moment (no halo rings)
         const float beat = 0.5f + 0.5f * std::sin(t * (0.9f + 0.23f * (i % 5)) + i * 2.399f);
         const float peak = std::pow(beat, 6.f);
         const float pop = ui::ease(std::clamp((since - 0.04f * i) / 0.25f, 0.f, 1.f));  // on open the stars pop in left to right
-        Star(dl, c, r * (0.6f + 0.4f * pop) * (1.f + 0.18f * peak), ui::col(ui::rgb(255, 255, 255), (0.7f + 0.3f * std::max(beat * 0.6f, peak)) * pop), i * 0.37f);
+        Star(dl, c, r * (0.6f + 0.4f * pop) * (1.f + 0.18f * peak), ui::col(ui::rgb(255, 255, 255), std::min(1.f, kDim[i] * (0.8f + 0.2f * beat) + 0.35f * peak) * pop), i * 0.37f);
     }
     dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
 }
@@ -500,7 +501,7 @@ void Window() {
         const auto [font, label] = TabLabel(pg.name);
         tabsW += font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, label).x / S + 22;
     }
-    const float W = ui::anim(0x57D, two ? 600.f : std::max(380.f, 230.f + tabsW), 16);
+    const float W = ui::anim(0x57D, two ? 720.f : std::max(380.f, 230.f + tabsW), 16);
     g_cols = two ? 2 : 1;
     if (g_x < 0 || g_y < 0) g_x = std::max(0.f, (io.DisplaySize.x / S - W) / 2), g_y = std::max(0.f, (io.DisplaySize.y / S - H) / 2);
     g_x = std::clamp(g_x, 0.f, std::max(0.f, io.DisplaySize.x / S - W));
@@ -652,6 +653,10 @@ void SetState(bool open, int r, int g, int b) {
     g_open = open;
     if (r >= 0) g_accent = (std::clamp(r, 0, 255) << 16) | (std::clamp(g, 0, 255) << 8) | std::clamp(b, 0, 255);
 }
+
+float g_renderScale = 1.f;
+float Scale() { return 600.f / 720.f * g_renderScale; }
+void SetRenderScale(float s) { g_renderScale = std::clamp(s, 0.5f, 2.f); }
 
 void Fonts(float scale) {
     S = scale;

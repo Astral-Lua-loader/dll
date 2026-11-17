@@ -66,7 +66,7 @@ bool InitImGui(IDXGISwapChain* swap) {
     g_window = desc.OutputWindow;
     g_device->GetImmediateContext(&g_context);
     MakeTarget(swap);
-    menu::Fonts(desc.BufferDesc.Height >= 1440 ? desc.BufferDesc.Height / 1080.0f : 1.0f);
+    menu::Fonts(menu::Scale());  // Astral's own size: its render scale, not the screen's height
     ImGui_ImplWin32_Init(g_window);
     ImGui_ImplDX11_Init(g_device, g_context);
     menu::SetDevice(g_device);

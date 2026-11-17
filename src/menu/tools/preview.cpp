@@ -120,7 +120,7 @@ int main() {
 
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
-    alm::menu::Fonts(1.0f);
+    alm::menu::Fonts(GetEnvironmentVariableA("ALM_REAL_SCALE", nullptr, 0) ? alm::menu::Scale() : 1.0f);  // ALM_REAL_SCALE: look at the real size (the click tests assume 1.0)
     ImGui_ImplDX11_Init(dev, ctx);
     alm::menu::SetConfigPath(cfg);
     alm::menu::SetSchema(kSchema);

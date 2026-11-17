@@ -24,6 +24,8 @@ extern "C" {
 
 __declspec(dllexport) int alm_version() { return 1; }
 
+__declspec(dllexport) void alm_scale(float s) { alm::menu::SetRenderScale(s); }  // before alm_init
+
 __declspec(dllexport) int alm_init() {
     if (g_up) return 1;
     wchar_t path[MAX_PATH] = {};
