@@ -20,5 +20,7 @@ void Fonts(float scale);  // after ImGui::CreateContext, before the backend buil
 void Frame();             // between NewFrame and Render
 bool WantsMouse();        // the cursor is over the menu (the window keeps those messages from the game)
 void Save();              // now, if anything changed
+bool RowAt(int slot, float* x, float* y);  // the centre of that control's row, last frame (the preview clicks by it)
+bool TabAt(int page, float* x, float* y);
 
 }  // namespace alm::menu

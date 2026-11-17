@@ -17,6 +17,9 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include "astral/config.h"
+#include "astral/ui.h"
+
 namespace alm::menu {
 namespace {
 
@@ -49,38 +52,6 @@ double g_dirtyAt = 0;
 
 std::atomic<bool> g_open{false}, g_wantMouse{false};
 std::atomic<int> g_accent{0x7C8CFF};
-
-// ---------------------------------------------------------------- look
-float S = 1;  // scale (1 at 1080p)
-ImFont *g_regular = nullptr, *g_semi = nullptr, *g_brand = nullptr, *g_small = nullptr;
-float g_alpha = 0;  // the open fade
-
-constexpr float W = 620, HEAD = 48, FOOT = 30, PAD = 16, GAP = 12, TITLE = 34, BOXW = 150;
-constexpr float GW = (W - 2 * PAD - GAP) / 2;
-float RowH(Kind k) { return k == kSlider ? 42.f : k == kCombo ? 32.f : 28.f; }
-
-ImU32 Col(unsigned rgb, float a = 1) {
-    return IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, static_cast<int>(255 * std::clamp(a * g_alpha, 0.f, 1.f)));
-}
-ImU32 Mix(unsigned a, unsigned b, float t, float alpha = 1) {
-    auto ch = [&](int s) { return static_cast<unsigned>(((a >> s) & 255) + (static_cast<int>((b >> s) & 255) - static_cast<int>((a >> s) & 255)) * t); };
-    return Col((ch(16) << 16) | (ch(8) << 8) | ch(0), alpha);
-}
-enum : unsigned {
-    cBg = 0x0F1014, cLine = 0x1D2026, cEdge = 0x23262D, cGroup = 0x15171C, cGroupEdge = 0x20232A, cText = 0xD4D7DD,
-    cHot = 0xF4F5F7, cDim = 0x8B909B, cFaint = 0x5C616C, cTitle = 0xA3A8B3, cTrack = 0x2A2D35, cBox = 0x1B1D23,
-    cBoxHot = 0x23262D, cWhite = 0xFFFFFF,
-};
-unsigned Accent() { return static_cast<unsigned>(g_accent.load()); }
-
-// eased per-widget values
-std::unordered_map<ImGuiID, float> g_anim;
-float Anim(ImGuiID id, float target, float speed = 14) {
-    auto [it, fresh] = g_anim.try_emplace(id, target);
-    float& v = it->second;
-    if (!fresh) v += (target - v) * std::min(1.f, ImGui::GetIO().DeltaTime * speed);
-    return v;
-}
 
 // ---------------------------------------------------------------- keys
 int g_listen = -1;          // a control waiting for its key
@@ -180,242 +151,189 @@ void SaveLocked() {
     if (MoveFileExW(part.c_str(), g_cfgPath.c_str(), MOVEFILE_REPLACE_EXISTING)) g_dirty = false;
 }
 
-// ---------------------------------------------------------------- widgets
-struct Ctx { ImDrawList* dl; ImVec2 o; };  // the group's top left (screen)
+// ---------------------------------------------------------------- look: astralmenu's widgets (astral/ui.*)
+float S = 1;          // scale (1 at 1080p)
+float g_openT = 0;    // Astral: opens in 4 frames, closes at once
+float g_pageT = 1;    // tab switch: fade in + 7 px rise
+float g_want = 300;   // the page's measured height (1080p px)
+bool g_drag = false;
+float g_barX = -1, g_barW = 0;  // the active tab's underline
+std::unordered_map<int, ImRect> g_rowRects;  // slot -> its row on screen (the preview clicks by these)
+std::vector<ImRect> g_tabRects;
 
-void Text(ImDrawList* dl, ImFont* f, ImVec2 p, ImU32 c, const std::string& s) { dl->AddText(f, f->FontSize, p, c, s.c_str()); }
-float TextW(ImFont* f, const std::string& s) { return f->CalcTextSizeA(f->FontSize, FLT_MAX, 0, s.c_str()).x; }
+constexpr float W = 720, HEAD = 35, FOOT = 35, PADX = 15, PADY = 14;
 
-bool Hit(const char* id, ImVec2 p, ImVec2 size) {
-    ImGui::SetCursorScreenPos(p);
-    return ImGui::InvisibleButton(id, size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+void Star(ImDrawList* dl, ImVec2 c, float r, ImU32 color, float rot) {
+    ImVec2 pts[10];
+    for (int i = 0; i < 10; ++i) {
+        const float a = rot + i * IM_PI / 5.f - IM_PI / 2.f, rr = (i & 1) ? r * 0.52f : r;
+        pts[i] = ImVec2(c.x + std::cos(a) * rr, c.y + std::sin(a) * rr);
+    }
+    dl->AddConcavePolyFilled(pts, 10, color);
 }
 
-int g_combo = -1;  // the control whose list is open
-ImVec2 g_comboAt, g_comboRow0, g_comboRow1;  // the list's spot; the open combo's row
+void Header(ImDrawList* dl, ImVec2 p, float w) {
+    const float h = ui::S(HEAD);
+    const int v0 = dl->VtxBuffer.Size;
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), IM_COL32_WHITE, ui::S(10), ImDrawFlags_RoundCornersTop);
+    ImGui::ShadeVertsLinearColorGradientKeepAlpha(dl, v0, dl->VtxBuffer.Size, p, ImVec2(p.x + w, p.y), ui::col(ui::accent()), ui::col(ui::accent2()));
+    static const float stars[][3] = {{85, 14, 5}, {111, 10, 5}, {139, 19, 7.5f}, {170, 13, 5.5f}, {214, 9, 5}, {237, 16, 7.5f},
+                                     {272, 10, 5}, {283, 23, 5}, {313, 19, 7.5f}, {334, 9, 5}, {348, 24, 5}, {367, 12, 7.5f},
+                                     {397, 18, 5.5f}, {416, 9, 5}, {431, 23, 5}};
+    for (int i = 0; i < 15; ++i)
+        Star(dl, ImVec2(p.x + ui::S(stars[i][0]), p.y + ui::S(stars[i][1])), ui::S(stars[i][2] * 1.2f), ui::col(ui::rgb(255, 255, 255), 0.95f), i * 0.37f);
+    dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
+}
 
-void RowCheck(Ctx& x, Ctl& c, int index, float y) {
-    const ImVec2 p(x.o.x, x.o.y + y * S);
-    ImGui::PushID(index);
-    const bool clicked = Hit("row", p, ImVec2(GW * S, 28 * S));
-    const bool hover = ImGui::IsItemHovered();
-    const bool right = clicked && ImGui::GetIO().MouseReleased[ImGuiMouseButton_Right];
-    ImGui::PopID();
-    if (clicked && !right) Set(c.slot, Val(c.slot) != 0 ? 0 : 1);
-    if (right && c.bindable) g_listen = g_listen == index ? -1 : index, g_listenArmed = false;
+float Tabs(ImDrawList* dl, ImVec2 p, float w) {  // page names, right-aligned on the header; returns where they start
+    const int pages = static_cast<int>(g_pages.size());
+    const float h = ui::S(HEAD);
+    g_tabRects.assign(pages, ImRect());
+    float x = p.x + w - ui::S(16), barX = 0, barW = 0;
+    for (int i = pages - 1; i >= 0; --i) {
+        const char* name = g_pages[i].name.c_str();
+        const float tw = ui::fText->CalcTextSizeA(ui::fText->FontSize, FLT_MAX, 0, name).x;
+        x -= tw;
+        const ImRect bb(ImVec2(x - ui::S(9), p.y), ImVec2(x + tw + ui::S(9), p.y + h));
+        g_tabRects[i] = bb;
+        ImGui::PushID(1000 + i);
+        ImGui::SetCursorScreenPos(bb.Min);
+        if (ImGui::InvisibleButton("##tab", bb.GetSize()) && g_tab != i) g_tab = i, g_pageT = 0, MarkDirty();
+        const float on = ui::anim(ImGui::GetItemID(), g_tab == i ? 1.f : 0.f), hv = ui::anim(ImGui::GetItemID() + 1, ImGui::IsItemHovered() ? 1.f : 0.f);
+        ImGui::PopID();
+        dl->AddText(ui::fText, ui::fText->FontSize, ImVec2(std::floor(x), std::floor(p.y + (h - ui::fText->FontSize) * 0.5f)),
+                    ui::col(ImVec4(1, 1, 1, 0.62f + 0.38f * std::max(on, hv))), name);
+        if (g_tab == i) barX = x, barW = tw;
+        x -= ui::S(22);
+    }
+    if (pages) {
+        if (g_barX < 0) g_barX = barX, g_barW = barW;
+        g_barX = ui::anim(0xBA1, barX, 18), g_barW = ui::anim(0xBA2, barW, 18);
+        dl->AddRectFilled(ImVec2(g_barX, p.y + h - ui::S(4)), ImVec2(g_barX + g_barW, p.y + h - ui::S(2)), ui::col(ui::rgb(255, 255, 255)), ui::S(1));
+    }
+    return x;
+}
 
-    const bool on = Val(c.slot) != 0;
-    const ImGuiID id = ImGui::GetID(c.id.c_str());
-    const float t = Anim(id, on ? 1.f : 0.f), h = Anim(id + 1, hover ? 1.f : 0.f);
-    Text(x.dl, g_regular, ImVec2(p.x + 12 * S, p.y + 5 * S), Mix(cText, cHot, std::max(t, h)), c.name);
-    const ImVec2 sw(p.x + (GW - 42) * S, p.y + 6 * S);
-    x.dl->AddRectFilled(sw, ImVec2(sw.x + 30 * S, sw.y + 16 * S), Mix(cTrack, Accent(), t), 8 * S);
-    x.dl->AddCircleFilled(ImVec2(sw.x + (8 + 14 * t) * S, sw.y + 8 * S), 6 * S, Mix(cDim, cWhite, t));
+void Footer(ImDrawList* dl, ImVec2 p, float w) {
+    const float h = ui::S(FOOT);
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui::col(ui::pal::group), ui::S(10), ImDrawFlags_RoundCornersBottom);
+    const char* hint = g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : "Right-click a checkbox to bind a key  \xC2\xB7  drag the header to move";
+    dl->AddText(ui::fSmall, ui::fSmall->FontSize, ImVec2(p.x + ui::S(14), std::floor(p.y + (h - ui::fSmall->FontSize) * 0.5f)), ui::col(ui::pal::textDim), hint);
+}
 
-    if (!c.bindable) return;
+std::string Fmt(const Ctl& c) {  // a printf format for the slider's value: the step's decimals + the suffix
+    int dec = 0;
+    for (double s = c.step; s < 0.999 && dec < 3; s *= 10) ++dec;
+    std::string suffix;
+    for (char ch : c.suffix) suffix += ch == '%' ? "%%" : std::string(1, ch);
+    return "%." + std::to_string(dec) + "f" + suffix;
+}
+
+void KeyChip(const Ctl& c, int index, const ImRect& row) {
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && ImGui::IsMouseHoveringRect(row.Min, row.Max) &&
+        ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows))
+        g_listen = g_listen == index ? -1 : index, g_listenArmed = false;
     char buf[8];
     const bool listening = g_listen == index;
     const char* name = listening ? "..." : c.key > 0 ? KeyName(c.key, buf) : nullptr;
     if (!name) return;
-    const float tw = TextW(g_small, name), cw = std::max(22 * S, tw + 12 * S);
-    const ImVec2 a(sw.x - 8 * S - cw, p.y + 5 * S);
-    x.dl->AddRectFilled(a, ImVec2(a.x + cw, a.y + 18 * S), Col(cBox), 4 * S);
-    Text(x.dl, g_small, ImVec2(a.x + (cw - tw) / 2, a.y + 2 * S), listening ? Col(Accent()) : Col(cDim), name);
-}
-
-std::string Fmt(const Ctl& c, double v) {
-    int dec = 0;
-    for (double s = c.step; s < 0.999 && dec < 3; s *= 10) ++dec;
-    char buf[48];
-    std::snprintf(buf, sizeof(buf), "%.*f%s", dec, v, c.suffix.c_str());
-    return buf;
-}
-
-void RowSlider(Ctx& x, Ctl& c, int index, float y) {
-    const ImVec2 p(x.o.x, x.o.y + y * S);
-    const float tx = p.x + 12 * S, tw = (GW - 24) * S;
-    ImGui::PushID(index);
-    Hit("row", p, ImVec2(GW * S, 42 * S));
-    const bool hover = ImGui::IsItemHovered(), active = ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    ImGui::PopID();
-    if (active) {
-        const double f = std::clamp((ImGui::GetIO().MousePos.x - tx) / tw, 0.f, 1.f);
-        const double step = c.step > 0 ? c.step : 1;
-        Set(c.slot, std::clamp(std::round((c.min + f * (c.max - c.min)) / step) * step, c.min, c.max));
-    }
-    const double v = Val(c.slot);
-    const float f = c.max > c.min ? static_cast<float>(std::clamp((v - c.min) / (c.max - c.min), 0.0, 1.0)) : 0.f;
-    const ImGuiID id = ImGui::GetID(c.id.c_str());
-    const float h = Anim(id + 1, hover || active ? 1.f : 0.f), fa = active ? f : Anim(id, f, 18);
-    Text(x.dl, g_regular, ImVec2(tx, p.y + 4 * S), Mix(cText, cHot, h), c.name);
-    const std::string vs = Fmt(c, v);
-    Text(x.dl, g_regular, ImVec2(p.x + (GW - 12) * S - TextW(g_regular, vs), p.y + 4 * S), Mix(cDim, cHot, active ? 1.f : 0.f), vs);
-    const float ty = p.y + 29 * S;
-    x.dl->AddRectFilled(ImVec2(tx, ty), ImVec2(tx + tw, ty + 4 * S), Col(cTrack), 2 * S);
-    if (fa > 0.001f) x.dl->AddRectFilled(ImVec2(tx, ty), ImVec2(tx + tw * fa, ty + 4 * S), Col(Accent()), 2 * S);
-    x.dl->AddCircleFilled(ImVec2(tx + tw * fa, ty + 2 * S), (5 + 1.5f * h) * S, Col(cWhite));
-}
-
-void RowCombo(Ctx& x, Ctl& c, int index, float y) {
-    const ImVec2 p(x.o.x, x.o.y + y * S);
-    const ImVec2 b(p.x + (GW - 12 - BOXW) * S, p.y + 4 * S);
-    ImGui::PushID(index);
-    const bool clicked = Hit("row", p, ImVec2(GW * S, 32 * S));
-    const bool hover = ImGui::IsItemHovered();
-    const bool right = clicked && ImGui::GetIO().MouseReleased[ImGuiMouseButton_Right];
-    ImGui::PopID();
-    if (clicked && !right) g_combo = g_combo == index ? -1 : index, g_comboAt = ImVec2(b.x, b.y + 28 * S);
-    if (g_combo == index) g_comboRow0 = p, g_comboRow1 = ImVec2(p.x + GW * S, p.y + 32 * S);
-    const ImGuiID id = ImGui::GetID(c.id.c_str());
-    const float h = Anim(id + 1, hover || g_combo == index ? 1.f : 0.f);
-    Text(x.dl, g_regular, ImVec2(p.x + 12 * S, p.y + 7 * S), Mix(cText, cHot, h), c.name);
-    x.dl->AddRectFilled(b, ImVec2(b.x + BOXW * S, b.y + 24 * S), Mix(cBox, cBoxHot, h), 5 * S);
-    x.dl->AddRect(b, ImVec2(b.x + BOXW * S, b.y + 24 * S), Col(cEdge), 5 * S);
-    const int i = static_cast<int>(Val(c.slot));
-    const std::string cur = i >= 0 && i < static_cast<int>(c.opts.size()) ? c.opts[i] : "";
-    x.dl->PushClipRect(b, ImVec2(b.x + (BOXW - 24) * S, b.y + 24 * S), true);
-    Text(x.dl, g_regular, ImVec2(b.x + 10 * S, b.y + 4 * S), Col(cText), cur);
-    x.dl->PopClipRect();
-    const ImVec2 ch(b.x + (BOXW - 15) * S, b.y + 10 * S);  // chevron
-    const float open = Anim(id + 2, g_combo == index ? 1.f : 0.f, 18), d = 3.5f * S * (1 - 2 * open);
-    x.dl->AddLine(ImVec2(ch.x - 3.5f * S, ch.y + 2 * S - d * 0.3f), ImVec2(ch.x, ch.y + 2 * S + d * 0.7f), Col(cDim), 1.5f * S);
-    x.dl->AddLine(ImVec2(ch.x, ch.y + 2 * S + d * 0.7f), ImVec2(ch.x + 3.5f * S, ch.y + 2 * S - d * 0.3f), Col(cDim), 1.5f * S);
-}
-
-void ComboList() {
-    if (g_combo < 0 || g_combo >= static_cast<int>(g_ctls.size())) return void(g_combo = -1);
-    Ctl& c = g_ctls[g_combo];
-    const float ih = 26 * S, w = BOXW * S, h = c.opts.size() * ih + 6 * S;
-    const float t = Anim(0xC0B0, 1.f, 20);
-    ImGui::SetNextWindowPos(ImVec2(g_comboAt.x, g_comboAt.y - (1 - t) * 4 * S));
-    ImGui::SetNextWindowSize(ImVec2(w, h));
-    ImGui::Begin("##almlist", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
-                                           ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove);
-    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+    ImFont* f = ui::fSmall;
+    const float tw = f->CalcTextSizeA(f->FontSize, FLT_MAX, 0, name).x, cw = std::max(ui::S(24), tw + ui::S(12)), ch = ui::S(20);
+    const ImVec2 a(row.Max.x - cw, std::floor((row.Min.y + row.Max.y - ch) * 0.5f));
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 o = ImGui::GetWindowPos();
-    const float a = t;
-    dl->AddRectFilled(o, ImVec2(o.x + w, o.y + h), Col(cBox, a), 5 * S);
-    dl->AddRect(o, ImVec2(o.x + w, o.y + h), Col(cEdge, a), 5 * S);
-    const int sel = static_cast<int>(Val(c.slot));
-    for (int i = 0; i < static_cast<int>(c.opts.size()); ++i) {
-        const ImVec2 p(o.x + 3 * S, o.y + 3 * S + i * ih);
-        ImGui::PushID(i);
-        const bool clicked = Hit("opt", p, ImVec2(w - 6 * S, ih));
-        const bool hover = ImGui::IsItemHovered();
-        ImGui::PopID();
-        if (hover) dl->AddRectFilled(p, ImVec2(p.x + w - 6 * S, p.y + ih), Col(cBoxHot, a), 4 * S);
-        Text(dl, g_regular, ImVec2(p.x + 8 * S, p.y + 5 * S), i == sel ? Col(Accent(), a) : Col(hover ? cHot : cText, a), c.opts[i]);
-        if (clicked) Set(c.slot, i), g_combo = -1;
-    }
-    const bool overList = ImGui::IsMouseHoveringRect(o, ImVec2(o.x + w, o.y + h), false);
-    ImGui::End();
-    if (g_combo >= 0 && !overList && (ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1)) &&
-        !ImGui::IsMouseHoveringRect(g_comboRow0, g_comboRow1, false))
-        g_combo = -1;
-    if (g_combo < 0) g_anim.erase(0xC0B0);
+    dl->AddRectFilled(a, ImVec2(a.x + cw, a.y + ch), ui::col(ui::pal::field), ui::S(4));
+    dl->AddText(f, f->FontSize, ImVec2(std::floor(a.x + (cw - tw) / 2), std::floor(a.y + (ch - f->FontSize) / 2)),
+                ui::col(listening ? ui::accent() : ui::pal::textOff), name);
 }
 
-float PageHeight(const Page& page) {
-    float cols[2] = {0, 0};
-    for (const Group& g : page.groups) {
-        float h = TITLE + 8;
-        for (int i : g.ctls) h += RowH(g_ctls[i].kind);
-        cols[g.col ? 1 : 0] += h + GAP;
+void Row(Ctl& c, int index) {
+    ImGui::PushID(index);
+    const ImVec2 top = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    if (c.kind == kCheck) {
+        bool v = Val(c.slot) != 0;
+        if (ui::checkbox(c.name.c_str(), &v)) Set(c.slot, v ? 1 : 0);
+    } else if (c.kind == kSlider) {
+        float v = static_cast<float>(Val(c.slot));
+        const std::string fmt = Fmt(c);
+        if (ui::slider(c.name.c_str(), &v, static_cast<float>(c.min), static_cast<float>(c.max), fmt.c_str())) {
+            const double step = c.step > 0 ? c.step : 1;
+            Set(c.slot, std::clamp(std::round(v / step) * step, c.min, c.max));
+        }
+    } else {
+        std::vector<const char*> items;
+        for (const std::string& o : c.opts) items.push_back(o.c_str());
+        int v = static_cast<int>(Val(c.slot));
+        if (ui::combo(c.name.c_str(), &v, items.data(), static_cast<int>(items.size()))) Set(c.slot, v);
     }
-    return std::max({cols[0], cols[1], 120.f + GAP}) - GAP;
+    const ImRect row(top, ImVec2(top.x + w, ImGui::GetCursorScreenPos().y));
+    g_rowRects[c.slot] = row;
+    if (c.kind == kCheck && c.bindable) KeyChip(c, index, row);
+    ImGui::PopID();
 }
 
 void Window() {
     ImGuiIO& io = ImGui::GetIO();
     const int pages = static_cast<int>(g_pages.size());
     g_tab = std::clamp(g_tab, 0, std::max(0, pages - 1));
-    const float targetH = HEAD + PAD + (pages ? PageHeight(g_pages[g_tab]) : 120.f) + PAD + FOOT;
-    const float H = Anim(0xA11, targetH, 16);
-    if (g_x < 0 || g_y < 0) g_x = 80, g_y = std::max(0.f, (io.DisplaySize.y / S - targetH) / 2);
+    const float maxH = io.DisplaySize.y / S - 20;
+    const float H = std::min(HEAD + PADY + std::max(g_want, 60.f) + PADY + FOOT, maxH);
+    if (g_x < 0 || g_y < 0) g_x = std::max(0.f, (io.DisplaySize.x / S - W) / 2), g_y = std::max(0.f, (io.DisplaySize.y / S - H) / 2);
     g_x = std::clamp(g_x, 0.f, std::max(0.f, io.DisplaySize.x / S - W));
     g_y = std::clamp(g_y, 0.f, std::max(0.f, io.DisplaySize.y / S - HEAD));
-    const ImVec2 o(std::round(g_x * S), std::round(g_y * S)), size(W * S, H * S);
+    const ImVec2 p(std::round(g_x * S), std::round(g_y * S)), size(std::round(W * S), std::round(H * S));
 
-    ImGui::SetNextWindowPos(o);
+    ImGui::SetNextWindowPos(p);
     ImGui::SetNextWindowSize(size);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_openT);
     ImGui::Begin("##alm", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
-                                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
+                                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBringToFrontOnFocus);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 e(o.x + size.x, o.y + size.y);
-    ImDrawList* bg = ImGui::GetBackgroundDrawList();
-    for (int i = 1; i <= 4; ++i)  // a soft shadow
-        bg->AddRectFilled(ImVec2(o.x - i * 3 * S, o.y - i * 2 * S), ImVec2(e.x + i * 3 * S, e.y + i * 5 * S),
-                          IM_COL32(0, 0, 0, static_cast<int>(28 * g_alpha / i)), (8 + i * 3) * S);
-    dl->AddRectFilled(o, e, Col(cBg), 8 * S);
-    dl->AddRect(o, e, Col(cEdge), 8 * S);
+    dl->AddRectFilled(ImVec2(p.x, p.y + ui::S(HEAD - 1)), ImVec2(p.x + size.x, p.y + size.y - ui::S(FOOT - 1)), ui::col(ui::pal::bg));
+    Header(dl, p, size.x);
+    Footer(dl, ImVec2(p.x, p.y + size.y - ui::S(FOOT)), size.x);
+    const float tabsAt = Tabs(dl, p, size.x);
 
-    // top bar: brand, tabs (drag the bar to move)
-    Text(dl, g_brand, ImVec2(o.x + 18 * S, o.y + 13 * S), Col(cHot), "astral");
-    dl->AddLine(ImVec2(o.x, o.y + HEAD * S), ImVec2(e.x, o.y + HEAD * S), Col(cLine));
-    ImGui::SetCursorScreenPos(o);
-    ImGui::SetNextItemAllowOverlap();
-    ImGui::InvisibleButton("##drag", ImVec2(size.x, HEAD * S));
-    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0)) {
-        g_x += io.MouseDelta.x / S, g_y += io.MouseDelta.y / S;
-        MarkDirty();
-    }
-    float tx = o.x + 104 * S, barX = 0, barW = 0;
-    for (int i = 0; i < pages; ++i) {
-        const float w = TextW(g_semi, g_pages[i].name) + 28 * S;
-        ImGui::PushID(1000 + i);
-        if (Hit("tab", ImVec2(tx, o.y), ImVec2(w, HEAD * S)) && g_tab != i) g_tab = i, g_combo = -1, MarkDirty(), g_anim[0xFADE] = 0.f;
-        const bool hover = ImGui::IsItemHovered();
-        ImGui::PopID();
-        const float h = Anim(ImGui::GetID(g_pages[i].name.c_str()), g_tab == i ? 1.f : hover ? 0.5f : 0.f);
-        Text(dl, g_semi, ImVec2(tx + 14 * S, o.y + 15 * S), h > 0.5f ? Mix(cText, cHot, (h - 0.5f) * 2) : Mix(cDim, cText, h * 2), g_pages[i].name);
-        if (g_tab == i) barX = tx + 14 * S, barW = w - 28 * S;
-        tx += w;
-    }
-    if (pages) {
-        const float bx = Anim(0xBA1, barX, 18), bw = Anim(0xBA2, barW, 18);
-        dl->AddRectFilled(ImVec2(bx, o.y + (HEAD - 2) * S), ImVec2(bx + bw, o.y + HEAD * S), Col(Accent()), 1 * S);
-    }
+    const ImRect drag(p, ImVec2(tabsAt, p.y + ui::S(HEAD)));
+    if (ImGui::IsMouseClicked(0) && drag.Contains(io.MousePos) && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) g_drag = true;
+    if (!ImGui::IsMouseDown(0)) g_drag = false;
+    if (g_drag && (io.MouseDelta.x != 0 || io.MouseDelta.y != 0)) g_x += io.MouseDelta.x / S, g_y += io.MouseDelta.y / S, MarkDirty();
 
-    // page: two columns of groups, fading in on a switch
+    if (g_listen >= 0 && g_listenArmed && ImGui::IsMouseClicked(0)) g_listen = -1;  // a click anywhere cancels the bind
+    g_pageT = std::min(1.f, g_pageT + io.DeltaTime / 0.16f);
+    const float e = ui::ease(g_pageT);
+    const ImVec2 pageMin(p.x + ui::S(PADX), p.y + ui::S(HEAD + PADY) + (1 - e) * ui::S(7));
+    const ImVec2 pageSize(size.x - ui::S(2 * PADX), size.y - ui::S(HEAD + PADY) - ui::S(PADY + FOOT));
+    ImGui::SetCursorScreenPos(pageMin);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_openT * e);
+    ImGui::BeginChild("##page", pageSize, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ui::page(pageMin, ImVec2(pageMin.x + pageSize.x, pageMin.y + pageSize.y));
     if (pages) {
-        const float fade = Anim(0xFADE, 1.f, 12);
-        const float saved = g_alpha;
-        g_alpha *= fade;
-        dl->PushClipRect(ImVec2(o.x, o.y + (HEAD + 1) * S), ImVec2(e.x, e.y - FOOT * S), true);
-        float ys[2] = {PAD, PAD};
-        int index = 0;
-        for (Group& g : g_pages[g_tab].groups) {
-            const int col = g.col ? 1 : 0;
-            float h = TITLE + 8;
-            for (int i : g.ctls) h += RowH(g_ctls[i].kind);
-            Ctx x{dl, ImVec2(o.x + (PAD + col * (GW + GAP)) * S, o.y + (HEAD + ys[col] + (1 - fade) * 6) * S)};
-            ys[col] += h + GAP;
-            dl->AddRectFilled(x.o, ImVec2(x.o.x + GW * S, x.o.y + h * S), Col(cGroup), 6 * S);
-            dl->AddRect(x.o, ImVec2(x.o.x + GW * S, x.o.y + h * S), Col(cGroupEdge), 6 * S);
-            Text(dl, g_semi, ImVec2(x.o.x + 12 * S, x.o.y + 10 * S), Col(cTitle), g.name);
-            float y = TITLE;
-            for (int i : g.ctls) {
-                Ctl& c = g_ctls[i];
-                if (c.kind == kCheck) RowCheck(x, c, i, y);
-                else if (c.kind == kSlider) RowSlider(x, c, i, y);
-                else RowCombo(x, c, i, y);
-                y += RowH(c.kind);
-                ++index;
+        ImGui::PushID(g_tab);
+        float colH[2] = {0, 0};
+        auto& groups = g_pages[g_tab].groups;
+        for (int col = 0; col < 2; ++col) {
+            ui::column(col, 2);
+            for (int gi = 0; gi < static_cast<int>(groups.size()); ++gi) {
+                Group& g = groups[gi];
+                if ((g.col ? 1 : 0) != col) continue;
+                ImGui::PushID(gi);
+                ui::beginGroup(g.name.c_str());
+                colH[col] += ui::lastGroupWant() + ui::S(15);
+                for (int i : g.ctls) Row(g_ctls[i], i);
+                ui::endGroup();
+                ImGui::PopID();
             }
         }
-        dl->PopClipRect();
-        g_alpha = saved;
+        ImGui::PopID();
+        g_want = (std::max(colH[0], colH[1]) - ui::S(15)) / S;
     } else {
-        Text(dl, g_regular, ImVec2(o.x + 18 * S, o.y + (HEAD + PAD) * S), Col(cDim), "Waiting for the Lua...");
+        ui::text("Waiting for the Lua...", ui::pal::textDim);
     }
-
-    // footer
-    dl->AddLine(ImVec2(o.x, e.y - FOOT * S), ImVec2(e.x, e.y - FOOT * S), Col(cLine));
-    Text(dl, g_small, ImVec2(o.x + 18 * S, e.y - 22 * S), Col(cFaint),
-         g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : "Right-click a toggle to bind a key  \xC2\xB7  drag the top bar to move");
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
     ImGui::End();
-    ComboList();
+    ImGui::PopStyleVar();
 }
 
 std::string g_pending;  // a schema from the Lua, applied by SetSchema itself (under g_lock)
@@ -431,7 +349,7 @@ void SetConfigPath(const std::wstring& path) {
 void SetSchema(const std::string& text) {
     std::lock_guard lock(g_lock);
     if (!g_ctls.empty()) SaveLocked();  // the last load's values into g_cfg first
-    g_pages.clear(), g_ctls.clear(), g_combo = -1, g_listen = -1;
+    g_pages.clear(), g_ctls.clear(), g_rowRects.clear(), g_listen = -1;
     std::istringstream lines(text);
     for (std::string line; std::getline(lines, line);) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -479,42 +397,39 @@ void SetState(bool open, int r, int g, int b) {
 
 void Fonts(float scale) {
     S = scale;
-    ImGuiIO& io = ImGui::GetIO();
-    char win[MAX_PATH] = "C:\\Windows";
-    GetWindowsDirectoryA(win, MAX_PATH);
-    const std::string dir = std::string(win) + "\\Fonts\\";
-    auto load = [&](const char* file, float px) -> ImFont* {
-        const std::string path = dir + file;
-        if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) return nullptr;
-        ImFontConfig cfg;
-        cfg.OversampleH = 2, cfg.PixelSnapH = false;
-        return io.Fonts->AddFontFromFileTTF(path.c_str(), px * S, &cfg);
-    };
-    g_regular = load("segoeui.ttf", 15);
-    g_semi = load("seguisb.ttf", 15);
-    g_brand = load("seguisb.ttf", 18);
-    g_small = load("segoeui.ttf", 12.5f);
-    ImFont* fallback = g_regular ? g_regular : io.Fonts->AddFontDefault();
-    for (ImFont** f : {&g_regular, &g_semi, &g_brand, &g_small})
-        if (!*f) *f = fallback;
-    io.FontDefault = g_regular;
-    ImGuiStyle& st = ImGui::GetStyle();
-    st.WindowPadding = ImVec2(0, 0), st.WindowBorderSize = 0, st.ItemSpacing = ImVec2(0, 0);
+    ui::bindMenus = false;  // keys bind the loader's way (right-click a checkbox), saved in menu.cfg
+    ui::setup(scale);
 }
 
 void Frame() {
     std::lock_guard lock(g_lock);
     Keys();
-    g_alpha += ((g_open ? 1.f : 0.f) - g_alpha) * std::min(1.f, ImGui::GetIO().DeltaTime * 16);
-    if (g_open && g_alpha > 0.995f) g_alpha = 1;
-    if (!g_open && g_alpha < 0.01f) {
-        g_alpha = 0, g_combo = -1;
+    const int a = g_accent.load();
+    cfg::accent = ImVec4(((a >> 16) & 255) / 255.f, ((a >> 8) & 255) / 255.f, (a & 255) / 255.f, 1.f);
+    if (!g_open) {
+        g_openT = 0, g_drag = false;
         if (g_listen >= 0) g_listen = -1;
     } else {
+        g_openT = std::min(1.f, g_openT + ImGui::GetIO().DeltaTime / 0.067f);
         Window();
     }
-    g_wantMouse = g_alpha > 0.5f && ImGui::GetIO().WantCaptureMouse;
+    g_wantMouse = g_open && ImGui::GetIO().WantCaptureMouse;
     if (g_dirty && ImGui::GetTime() - g_dirtyAt > 0.5) SaveLocked();
+}
+
+bool RowAt(int slot, float* x, float* y) {
+    std::lock_guard lock(g_lock);
+    const auto it = g_rowRects.find(slot);
+    if (it == g_rowRects.end()) return false;
+    *x = (it->second.Min.x + it->second.Max.x) / 2, *y = (it->second.Min.y + it->second.Max.y) / 2;
+    return true;
+}
+
+bool TabAt(int page, float* x, float* y) {
+    std::lock_guard lock(g_lock);
+    if (page < 0 || page >= static_cast<int>(g_tabRects.size())) return false;
+    *x = g_tabRects[page].GetCenter().x, *y = g_tabRects[page].GetCenter().y;
+    return true;
 }
 
 bool WantsMouse() { return g_wantMouse; }

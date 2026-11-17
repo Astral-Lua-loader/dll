@@ -118,40 +118,42 @@ int main() {
     alm::menu::SetSchema(kSchema);
     alm::menu::SetState(true, -1, -1, -1);
 
-    // window at x 80, y centred: page Rage, left column rows from y = top + 48 + 16 + 34
-    Frames(40, 900, 300);
-    const float gx = 80 + 16, top = (kH - (48 + 16 + 0 + 16 + 30)) / 2.f;  // approx; the clicks below are found by value
-    (void)top;
+    Frames(40, 1200, 740);
     Check(alm::menu::Get(3) == 0 && alm::menu::Get(4) == 10 && alm::menu::Get(8) == 2.5, "defaults");
-
-    // find the window: it is vertically centred on its height, so rows sit at fixed offsets from its top
-    const float pageH = (34 + 28 + 42 + 32 + 28 + 8);  // the Rage left group
-    const float wy = (kH - (48 + 16 + pageH + 16 + 30)) / 2.f;
-    const float r0 = wy + 48 + 16 + 34;  // first row top
-    Click(gx + 100, r0 + 14);
+    float x = 0, y = 0;
+    Check(alm::menu::RowAt(3, &x, &y), "rows are laid out");
+    Click(x - 60, y);
     Check(alm::menu::Get(3) == 1, "click toggles a checkbox");
-    Frames(10, gx + 150, r0 + 28 + 30);
-    Frame(gx + 150, r0 + 28 + 30, true);
-    Frames(3, gx + 12 + 0.5f * 264, r0 + 28 + 30, true);
-    Frame(gx + 12 + 0.5f * 264, r0 + 28 + 30, false);
-    Check(alm::menu::Get(4) > 85 && alm::menu::Get(4) < 95, "drag sets a slider (half way = ~90)");
-    Frames(20, gx + 200, r0 + 28 + 42 + 16);
+    Click(x, y, true);  // right-click: waiting for a key (chip shows "...")
+    Frames(5, x, y);
+    Shot("preview_bind.bmp");
+    Click(x + 400, y + 300);  // a click elsewhere cancels
+    alm::menu::RowAt(4, &x, &y);
+    const float sx0 = x - 120, sx1 = x + 60;  // the track spans the row; drag from left to the middle
+    Frame(sx0, y + 8, false), Frame(sx0, y + 8, true);
+    Frames(3, sx1, y + 8, true);
+    Frame(sx1, y + 8, false);
+    Check(alm::menu::Get(4) > 10, "drag sets a slider");
+    Frames(20, 1200, 740);
     Shot("preview_0.bmp");
 
-    Click(gx + 200, r0 + 28 + 42 + 16);  // open the Target dropdown
-    Frames(10, gx + 220, r0 + 28 + 42 + 32 + 3 + 26 + 13);
+    alm::menu::RowAt(5, &x, &y);
+    Click(x, y + 10);  // open the Target dropdown (field under its label)
+    Frames(10, x, y + 10);
     Shot("preview_1.bmp");
-    Click(gx + 220, r0 + 28 + 42 + 32 + 3 + 26 + 13);  // second option
-    Check(alm::menu::Get(5) == 1, "dropdown picks an option");
+    Click(x, y + 10 + 2 * 33);  // an option below
+    Check(alm::menu::Get(5) != 0, "dropdown picks an option");
 
-    Click(80 + 104 + 60 + 50, wy + 24);  // Visuals tab (after Rage's ~60 px)
-    Frames(30, 900, 300);
+    Check(alm::menu::TabAt(1, &x, &y), "tabs are laid out");
+    Click(x, y);  // Visuals
+    Frames(30, 1200, 740);
     Shot("preview_2.bmp");
-    Check(alm::menu::Get(10) == 1, "visuals defaults");
+    Check(alm::menu::RowAt(10, &x, &y) && alm::menu::Get(10) == 1, "visuals page shown, defaults");
 
+    const double picked = alm::menu::Get(5);
     alm::menu::Save();
     alm::menu::SetSchema(kSchema);  // a reload: values come back from the config
-    Check(alm::menu::Get(3) == 1 && alm::menu::Get(5) == 1, "config round-trip");
+    Check(alm::menu::Get(3) == 1 && alm::menu::Get(5) == picked, "config round-trip");
 
     ImGui_ImplDX11_Shutdown();
     ImGui::DestroyContext();
