@@ -37,7 +37,14 @@ const char* kSchema =
     "page\tMisc\n"
     "group\tMovement\t0\n"
     "check\t15\tBunny hop\t1\t1\n"
-    "check\t16\tAuto strafe\t0\t1\n";
+    "check\t16\tAuto strafe\t0\t1\n"
+    "page\tScripts\n"
+    "group\tScripts\t0\n"
+    "list\t20\tScripts\t380\tairduck^ecvd|Anime Menu^1tsuki|anti backstab^lordmouse|Chams^paradise|Spotify implementation^paradise|"
+    "Whitelist^april|watermark^sumeng|Skeleton^majesty|Region changer^paradise|Quick retreat^Yuk9|Hostage ESP^jack|"
+    "zeus range (BIG HUGE UPDATE)^abc|Floating killstreaks!^keer|Damage indicator^sumeng|Custom Hit Sound^silv|china hat^balls\n"
+    "group\tScript\t1\n"
+    "info\t90\tInfo\t20\n";
 
 constexpr int kW = 1280, kH = 760;
 ID3D11Device* dev = nullptr;
@@ -154,6 +161,19 @@ int main() {
     Click(x, y);  // a one-column page: the narrow window
     Frames(30, 1200, 740);
     Shot("preview_3.bmp");
+    Check(alm::menu::TabAt(3, &x, &y), "scripts tab");
+    Click(x, y);
+    Frames(30, 1200, 740);
+    float lx = 0, ly = 0;
+    Check(alm::menu::RowBox(20, &lx, &ly), "list laid out");
+    const float first = ly + 30 + 8 + 6 + 13;  // search line, gap, list padding, half a row
+    Click(lx + 16, first + 26);  // the second item's circle: on
+    Check(alm::menu::Get(22) == 1 && alm::menu::Get(20) == 1, "circle turns an item on and selects it");
+    Click(lx + 120, first + 3 * 26);  // the fourth item's name: selected, still off
+    Check(alm::menu::Get(20) == 3 && alm::menu::Get(24) == 0, "a name click selects only");
+    alm::menu::SetValue(25, 2);  // the Lua says item 5 failed
+    Frames(20, 1200, 740);
+    Shot("preview_4.bmp");
     const double picked = alm::menu::Get(5);
     alm::menu::Save();
     alm::menu::SetSchema(kSchema);  // a reload: values come back from the config

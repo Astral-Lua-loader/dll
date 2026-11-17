@@ -24,7 +24,7 @@ namespace alm::menu {
 namespace {
 
 // ---------------------------------------------------------------- model
-enum Kind { kCheck, kSlider, kCombo };
+enum Kind { kCheck, kSlider, kCombo, kList, kInfo };
 struct Ctl {
     Kind kind = kCheck;
     int slot = 0;
@@ -32,6 +32,8 @@ struct Ctl {
     double def = 0, min = 0, max = 1, step = 1;
     std::string suffix;
     std::vector<std::string> opts;
+    std::vector<std::pair<std::string, std::string>> items;  // list: title, author
+    char filter[64] = {};
     bool bindable = false;
     int key = 0;  // vk, 0 none
 };
@@ -140,7 +142,11 @@ void LoadConfig() {
 
 void SaveLocked() {
     if (g_cfgPath.empty()) return;
-    for (const Ctl& c : g_ctls) g_cfg[c.id] = {Val(c.slot), c.key};  // controls of other loads stay in the file
+    for (const Ctl& c : g_ctls) {  // controls of other loads stay in the file
+        if (c.kind == kInfo) continue;
+        g_cfg[c.id] = {Val(c.slot), c.key};
+        for (size_t i = 0; i < c.items.size(); ++i) g_cfg[c.id + "/" + c.items[i].first] = {Val(c.slot + 1 + static_cast<int>(i)) == 1 ? 1 : 0, 0};
+    }
     const std::wstring part = g_cfgPath + L".part";
     {
         std::ofstream out(part, std::ios::trunc);
@@ -219,7 +225,9 @@ float Tabs(ImDrawList* dl, ImVec2 p, float w) {  // page names, right-aligned on
 void Footer(ImDrawList* dl, ImVec2 p, float w) {
     const float h = ui::S(FOOT);
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui::col(ui::pal::group), ui::S(10), ImDrawFlags_RoundCornersBottom);
-    const char* hint = g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : "Right-click to bind a key  \xC2\xB7  drag the header to move";
+    bool binds = false;
+    for (const Ctl& c : g_ctls) binds |= c.bindable;
+    const char* hint = g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : binds ? "Right-click to bind a key  \xC2\xB7  drag the header to move" : "Drag the header to move";
     dl->AddText(ui::fSmall, ui::fSmall->FontSize, ImVec2(p.x + ui::S(14), std::floor(p.y + (h - ui::fSmall->FontSize) * 0.5f)), ui::col(ui::pal::textDim), hint);
 }
 
@@ -248,6 +256,137 @@ void KeyChip(const Ctl& c, int index, const ImRect& row) {
                 ui::col(listening ? ui::accent() : ui::pal::textOff), name);
 }
 
+ImU32 Red(float a = 1.f) { return ui::col(ui::rgb(232, 96, 96), a); }
+
+int ItemState(const Ctl& c, int i) { return static_cast<int>(Val(c.slot + 1 + i)); }
+void Toggle(const Ctl& c, int i) { Set(c.slot + 1 + i, ItemState(c, i) == 1 ? 0 : 1); }
+
+// Astral's script list: a search line, then one row per item with a state circle (click it or double-click the row
+// to switch the item on/off; click the row to select it). Values: slot = selected, slot + 1 + i = item i (0 off, 1 on, 2 failed).
+void ListRow(Ctl& c) {
+    ImGuiWindow* w = ImGui::GetCurrentWindow();
+    const float wd = ImGui::GetContentRegionAvail().x;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ui::S(12), ui::S(6)));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ui::S(4));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ui::pal::field);
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ui::pal::textDim);
+    ImGui::SetNextItemWidth(wd);
+    ImGui::InputTextWithHint("##search", "Search", c.filter, sizeof(c.filter));
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
+    ImGui::Dummy(ImVec2(0, ui::S(8)));
+
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float h = ui::S(static_cast<float>(c.def));
+    w->DrawList->AddRectFilled(p, ImVec2(p.x + wd, p.y + h), ui::col(ui::pal::field), ui::S(4));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, ui::S(6)));
+    ImGui::BeginChild("##list", ImVec2(wd, h), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground);
+    ImGui::PopStyleVar();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    std::string needle = c.filter;
+    for (char& ch : needle) ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+    const int sel = static_cast<int>(Val(c.slot));
+    const float rowH = ui::S(26);
+    int shown = 0;
+    for (int i = 0; i < static_cast<int>(c.items.size()); ++i) {
+        if (!needle.empty()) {
+            std::string hay = c.items[i].first + " " + c.items[i].second;
+            for (char& ch : hay) ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+            if (hay.find(needle) == std::string::npos) continue;
+        }
+        ++shown;
+        ImGui::PushID(i);
+        const ImVec2 r0 = ImGui::GetCursorScreenPos();
+        const float rw = ImGui::GetContentRegionAvail().x;
+        ImGui::InvisibleButton("##it", ImVec2(rw, rowH));
+        const bool hov = ImGui::IsItemHovered();
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+            if (ImGui::GetIO().MousePos.x < r0.x + ui::S(30) || ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) Toggle(c, i);
+            Set(c.slot, i);
+        }
+        const float hv = ui::anim(ImGui::GetItemID() + 9, hov ? 1.f : 0.f, 18.f);
+        const int st = ItemState(c, i);
+        const float on = ui::anim(ImGui::GetItemID() + 10, st == 1 ? 1.f : 0.f, 16.f);
+        const ImVec2 cc(r0.x + ui::S(16), r0.y + rowH * 0.5f);
+        const float rad = ui::S(6.5f);
+        if (st == 2) {
+            dl->AddCircleFilled(cc, rad, Red());
+            dl->AddLine(ImVec2(cc.x, cc.y - ui::S(3.5f)), ImVec2(cc.x, cc.y + ui::S(0.8f)), IM_COL32_WHITE, ui::S(1.6f));
+            dl->AddCircleFilled(ImVec2(cc.x, cc.y + ui::S(3)), ui::S(0.9f), IM_COL32_WHITE);
+        } else {
+            dl->AddCircle(cc, rad, ui::col(ui::pal::textDim, 1 - on), 20, ui::S(1.5f));
+            if (on > 0.01f) {
+                dl->AddCircleFilled(cc, rad, ui::col(ui::accent(), on), 20);
+                const ImVec2 a(cc.x - ui::S(3), cc.y), m(cc.x - ui::S(0.8f), cc.y + ui::S(2.4f)), e(cc.x + ui::S(3.2f), cc.y - ui::S(2.4f));
+                dl->AddLine(a, m, ui::col(ui::rgb(255, 255, 255), on), ui::S(1.6f));
+                dl->AddLine(m, e, ui::col(ui::rgb(255, 255, 255), on), ui::S(1.6f));
+            }
+        }
+        const ImVec4 tc = sel == i ? ui::accent() : ImVec4(ui::pal::label.x + (ui::pal::textOn.x - ui::pal::label.x) * hv,
+                                                           ui::pal::label.y + (ui::pal::textOn.y - ui::pal::label.y) * hv,
+                                                           ui::pal::label.z + (ui::pal::textOn.z - ui::pal::label.z) * hv, 1.f);
+        const float tx = r0.x + ui::S(30) + hv * ui::S(2), right = r0.x + rw - ui::S(10);
+        dl->PushClipRect(ImVec2(tx, r0.y), ImVec2(right, r0.y + rowH), true);
+        dl->AddText(ui::fText, ui::fText->FontSize, ImVec2(std::floor(tx), std::floor(r0.y + (rowH - ui::fText->FontSize) * 0.5f)), ui::col(tc), c.items[i].first.c_str());
+        dl->PopClipRect();
+        ImGui::PopID();
+    }
+    if (!shown) ui::text("  No matches", ui::pal::textDim);
+    const float maxScroll = ImGui::GetScrollMaxY();
+    if (maxScroll > 0) {
+        ImGuiWindow* cw = ImGui::GetCurrentWindow();
+        const float y1 = cw->Pos.y + cw->Size.y;
+        if (ImGui::GetScrollY() < maxScroll - 1.f) {  // more below: the last rows fade into the list
+            const ImU32 clear = ui::col(ImVec4(ui::pal::field.x, ui::pal::field.y, ui::pal::field.z, 0.f)), solid = ui::col(ui::pal::field);
+            cw->DrawList->AddRectFilledMultiColor(ImVec2(cw->Pos.x, y1 - ui::S(30)), ImVec2(cw->Pos.x + cw->Size.x - ui::S(9), y1), clear, clear, solid, solid);
+        }
+        const float trackH = cw->Size.y - ui::S(16);
+        const float thumb = std::max(ui::S(24), trackH * cw->Size.y / (cw->Size.y + maxScroll));
+        const float y = cw->Pos.y + ui::S(8) + (trackH - thumb) * (ImGui::GetScrollY() / maxScroll);
+        cw->DrawList->AddRectFilled(ImVec2(cw->Pos.x + cw->Size.x - ui::S(7), y), ImVec2(cw->Pos.x + cw->Size.x - ui::S(4), y + thumb), ui::col(ui::accent()), ui::S(2));
+    }
+    ImGui::EndChild();
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h + ui::S(4)));
+    ImGui::Dummy(ImVec2(0, 0));
+}
+
+// the selected item of a list: its title, author and state, with a button to switch it
+void InfoRow(Ctl& c) {
+    const Ctl* list = nullptr;
+    for (const Ctl& o : g_ctls)
+        if (o.kind == kList && o.slot == static_cast<int>(c.def)) list = &o;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float wd = ImGui::GetContentRegionAvail().x;
+    const int i = list ? static_cast<int>(Val(list->slot)) : -1;
+    if (!list || i < 0 || i >= static_cast<int>(list->items.size())) {
+        ui::text("Pick a script on the left", ui::pal::textDim);
+        return;
+    }
+    const auto& [title, author] = list->items[i];
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    const ImVec2 ts = ui::fTitle->CalcTextSizeA(ui::fTitle->FontSize, FLT_MAX, wd, title.c_str());
+    dl->AddText(ui::fTitle, ui::fTitle->FontSize, p, ui::col(ui::pal::textOn), title.c_str(), nullptr, wd);
+    p.y += ts.y + ui::S(4);
+    const std::string by = "by " + author;
+    dl->AddText(ui::fText, ui::fText->FontSize, p, ui::col(ui::pal::textDim), by.c_str());
+    p.y += ui::fText->FontSize + ui::S(14);
+    const int st = ItemState(*list, i);
+    const char* state = st == 1 ? "On" : st == 2 ? "Failed to load (see the console)" : "Off";
+    dl->AddCircleFilled(ImVec2(p.x + ui::S(5), p.y + ui::fText->FontSize * 0.5f), ui::S(4),
+                        st == 1 ? ui::col(ui::accent()) : st == 2 ? Red() : ui::col(ui::pal::textDim));
+    dl->AddText(ui::fText, ui::fText->FontSize, ImVec2(p.x + ui::S(16), p.y), st == 2 ? Red() : ui::col(ui::pal::label), state);
+    p.y += ui::fText->FontSize + ui::S(14);
+    ImGui::SetCursorScreenPos(p);
+    ImGui::Dummy(ImVec2(0, 0));
+    if (st != 2 && ui::button(st == 1 ? "Turn off" : "Turn on")) Toggle(*list, i);
+    ImGui::Dummy(ImVec2(0, ui::S(6)));
+    const char* note = "Off pauses it and hides its menu items. Click a circle or double-click a name to switch.";
+    const ImVec2 q = ImGui::GetCursorScreenPos();
+    const ImVec2 ns = ui::fSmall->CalcTextSizeA(ui::fSmall->FontSize, FLT_MAX, wd, note);
+    dl->AddText(ui::fSmall, ui::fSmall->FontSize, q, ui::col(ui::pal::textDim), note, nullptr, wd);
+    ImGui::Dummy(ImVec2(0, ns.y + ui::S(4)));
+}
+
 void Row(Ctl& c, int index) {
     ImGui::PushID(index);
     const ImVec2 top = ImGui::GetCursorScreenPos();
@@ -262,6 +401,10 @@ void Row(Ctl& c, int index) {
             const double step = c.step > 0 ? c.step : 1;
             Set(c.slot, std::clamp(std::round(v / step) * step, c.min, c.max));
         }
+    } else if (c.kind == kList) {
+        ListRow(c);
+    } else if (c.kind == kInfo) {
+        InfoRow(c);
     } else {
         std::vector<const char*> items;
         for (const std::string& o : c.opts) items.push_back(o.c_str());
@@ -284,7 +427,7 @@ void Window() {
     if (pages) for (const Group& g : g_pages[g_tab].groups) two |= g.col != 0;
     float tabsW = 0;
     for (const Page& pg : g_pages) tabsW += ui::fText->CalcTextSizeA(ui::fText->FontSize, FLT_MAX, 0, pg.name.c_str()).x / S + 22;
-    const float W = ui::anim(0x57D, two ? 720.f : std::max(380.f, 230.f + tabsW), 16);
+    const float W = ui::anim(0x57D, two ? 600.f : std::max(380.f, 230.f + tabsW), 16);
     g_cols = two ? 2 : 1;
     if (g_x < 0 || g_y < 0) g_x = std::max(0.f, (io.DisplaySize.x / S - W) / 2), g_y = std::max(0.f, (io.DisplaySize.y / S - H) / 2);
     g_x = std::clamp(g_x, 0.f, std::max(0.f, io.DisplaySize.x / S - W));
@@ -385,12 +528,26 @@ void SetSchema(const std::string& text) {
             c.kind = kSlider, c.min = std::atof(f[4].c_str()), c.max = std::atof(f[5].c_str()), c.step = std::atof(f[6].c_str()),
             c.suffix = f.size() > 7 ? f[7] : "";
         else if (f[0] == "combo" && f.size() >= 5) c.kind = kCombo, c.opts = Split(f[4], '|');
+        else if (f[0] == "list" && f.size() >= 5) {
+            c.kind = kList;
+            for (const std::string& it : Split(f[4], '|')) {
+                const size_t k = it.find('^');
+                c.items.push_back(k == std::string::npos ? std::make_pair(it, std::string()) : std::make_pair(it.substr(0, k), it.substr(k + 1)));
+            }
+            if (c.slot + static_cast<int>(c.items.size()) >= kSlots) continue;
+            for (size_t i = 0; i < c.items.size(); ++i) {
+                const auto it = g_cfg.find(c.id + "/" + c.items[i].first);
+                g_vals[c.slot + 1 + i] = it != g_cfg.end() && it->second.first == 1 ? 1 : 0;
+            }
+        } else if (f[0] == "info") c.kind = kInfo;
         else continue;
         double v = c.def;
         if (auto it = g_cfg.find(c.id); it != g_cfg.end()) v = it->second.first, c.key = c.bindable ? it->second.second : 0;
         else g_dirty = true, g_dirtyAt = 0;  // a new control: into menu.cfg with its default
         if (c.kind == kSlider) v = std::clamp(v, c.min, c.max);
         if (c.kind == kCombo) v = std::clamp(std::round(v), 0.0, std::max(0.0, c.opts.size() - 1.0));
+        if (c.kind == kList) v = std::clamp(std::round(v), -1.0, c.items.size() - 1.0);
+        if (c.kind == kInfo) v = 0;
         g_vals[c.slot] = v;
         group.ctls.push_back(static_cast<int>(g_ctls.size()));
         g_ctls.push_back(std::move(c));
@@ -398,6 +555,10 @@ void SetSchema(const std::string& text) {
 }
 
 double Get(int slot) { return Val(slot); }
+
+void SetValue(int slot, double v) {  // Lua thread: no ImGui here
+    if (slot >= 0 && slot < kSlots) g_vals[slot] = v;
+}
 
 void SetState(bool open, int r, int g, int b) {
     g_open = open;
@@ -431,6 +592,14 @@ bool RowAt(int slot, float* x, float* y) {
     const auto it = g_rowRects.find(slot);
     if (it == g_rowRects.end()) return false;
     *x = (it->second.Min.x + it->second.Max.x) / 2, *y = (it->second.Min.y + it->second.Max.y) / 2;
+    return true;
+}
+
+bool RowBox(int slot, float* x0, float* y0) {
+    std::lock_guard lock(g_lock);
+    const auto it = g_rowRects.find(slot);
+    if (it == g_rowRects.end()) return false;
+    *x0 = it->second.Min.x, *y0 = it->second.Min.y;
     return true;
 }
 

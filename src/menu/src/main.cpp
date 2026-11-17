@@ -37,6 +37,7 @@ __declspec(dllexport) int alm_init() {
 
 __declspec(dllexport) void alm_schema(const char* text) { if (text) alm::menu::SetSchema(text); }
 __declspec(dllexport) double alm_get(int slot) { return alm::menu::Get(slot); }
+__declspec(dllexport) void alm_set(int slot, double v) { alm::menu::SetValue(slot, v); }
 __declspec(dllexport) void alm_state(int open, int r, int g, int b) { alm::menu::SetState(open != 0, r, g, b); }
 
 __declspec(dllexport) void alm_shutdown() {

@@ -11,8 +11,11 @@ namespace alm::menu {
 //   check  <slot> <name> <default 0|1> <bindable 0|1>
 //   slider <slot> <name> <default> <min> <max> <step> <suffix>
 //   combo  <slot> <name> <default index> <opt1|opt2|...>
+//   list   <slot> <name> <height px> <title^author|...>   (slot = selected, slot+1+i = item i: 0 off, 1 on, 2 failed)
+//   info   <slot> <name> <list slot>                       (the list's selected item)
 void SetSchema(const std::string& text);  // any thread; applied next frame, saved values loaded into it
 double Get(int slot);                     // any thread
+void SetValue(int slot, double v);         // any thread (a list item's state from the Lua: 2 = failed)
 void SetState(bool open, int r, int g, int b);  // any thread: Astral's menu open, its accent (-1 unknown)
 
 void SetConfigPath(const std::wstring& path);
@@ -22,5 +25,6 @@ bool WantsMouse();        // the cursor is over the menu (the window keeps those
 void Save();              // now, if anything changed
 bool RowAt(int slot, float* x, float* y);  // the centre of that control's row, last frame (the preview clicks by it)
 bool TabAt(int page, float* x, float* y);
+bool RowBox(int slot, float* x0, float* y0);  // that row's top left
 
 }  // namespace alm::menu
