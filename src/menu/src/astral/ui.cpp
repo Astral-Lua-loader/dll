@@ -393,7 +393,7 @@ void endGroup() {
     ImGuiWindow* w = ImGui::GetCurrentWindow();
     g_height[gf.id] = ImGui::GetCursorPosY() + S(7);  // + the bottom padding: fits without scrolling
     const float maxScroll = ImGui::GetScrollMaxY();
-    if (maxScroll > 0) {  // Astral's thin accent scrollbar
+    if (maxScroll > S(2)) {  // Astral's thin accent scrollbar (not for a pixel of rounding)
         const ImRect r(w->Pos, w->Pos + w->Size);
         const float trackH = r.GetHeight() - S(8);
         const float thumb = std::max(S(24), trackH * r.GetHeight() / (r.GetHeight() + maxScroll));

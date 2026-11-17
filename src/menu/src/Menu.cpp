@@ -214,11 +214,13 @@ void Swirl(ImDrawList* dl, ImVec2 p, float w, float h, float since, float t) {
     ID3D11ShaderResourceView* tex = SwirlTexture();
     if (!tex) return;
     const float in = ui::ease(std::clamp(since / 0.45f, 0.f, 1.f));
-    const float tileW = h * kSwirlW / static_cast<float>(kSwirlH);  // the whole image at the header's height
+    // as Astral (matched on a side-by-side screenshot): the image across the full width, a slice a little above
+    // its middle showing (both hills' tops and the long line between them)
+    const float shown = w / static_cast<float>(kSwirlW) * kSwirlH;  // the image's height at full width
+    const float v = std::clamp(h / shown, 0.f, 1.f), v0 = std::clamp(0.40f - v * 0.5f, 0.f, 1.f - v);
     const float slide = (1 - in) * ui::S(18);
-    for (float x = p.x - tileW * 0.18f + slide; x < p.x + w; x += tileW)
-        dl->AddImage(reinterpret_cast<ImTextureID>(tex), ImVec2(x, p.y), ImVec2(x + tileW, p.y + h), ImVec2(0, 0), ImVec2(1, 1),
-                     ui::col(ui::rgb(255, 255, 255), 0.5f * in));
+    dl->AddImage(reinterpret_cast<ImTextureID>(tex), ImVec2(p.x + slide, p.y), ImVec2(p.x + w + slide, p.y + h), ImVec2(0, v0),
+                 ImVec2(1, v0 + v), ui::col(ui::rgb(255, 255, 255), 0.45f * in));
 }
 
 void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop before the tabs
@@ -552,7 +554,7 @@ void Window() {
             }
         }
         ImGui::PopID();
-        g_want = (std::max(colH[0], colH[1]) - ui::S(15)) / S;
+        g_want = (std::max(colH[0], colH[1]) - ui::S(15)) / S + 2;  // +2: rounding at non-1 scales must not cut groups off
     } else {
         ui::text("Waiting for the Lua...", ui::pal::textDim);
     }
