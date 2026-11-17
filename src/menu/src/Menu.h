@@ -19,6 +19,7 @@ void SetSchema(const std::string& text);  // any thread; applied next frame, sav
 double Get(int slot);                     // any thread
 void SetUser(const std::string& name);    // any thread: the footer's username
 void SetDevice(ID3D11Device* device);     // render thread, once: starts the footer's Steam avatar
+void ReleaseTextures();                   // shutdown: the header swirl texture
 void SetValue(int slot, double v);         // any thread (a list item's state from the Lua: 2 = failed)
 void SetState(bool open, int r, int g, int b);  // any thread: Astral's menu open, its accent (-1 unknown)
 

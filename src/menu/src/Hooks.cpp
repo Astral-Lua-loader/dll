@@ -168,6 +168,7 @@ void Shutdown() {
     for (int i = 0; i < 50 && g_inside > 0; ++i) Sleep(10);  // a frame or message still in our code
     Sleep(50);
     menu::Save();
+    menu::ReleaseTextures();
     avatar::Stop();
     if (g_imgui) ImGui_ImplDX11_Shutdown(), ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();

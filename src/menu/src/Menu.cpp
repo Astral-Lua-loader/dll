@@ -20,6 +20,7 @@
 #include "astral/config.h"
 #include "astral/ui.h"
 #include "Avatar.h"
+#include "swirl.h"
 
 namespace alm::menu {
 namespace {
@@ -183,51 +184,41 @@ void Star(ImDrawList* dl, ImVec2 c, float r, ImU32 color, float rot) {
     dl->AddConcavePolyFilled(pts, 10, color);
 }
 
-// Astral's header streaks (from a recording of it): thin light trails running along curves like comets, the tail
-// fading out behind the head, one with a small sparkle at its head. Each has its own path, speed and start, so they
-// cross the header at different times; on open they all start at once and spread out.
-struct Streak { ImVec2 a, b, c, d; float period, offset, tail, alpha; bool sparkle; };
-const Streak kStreaks[] = {
-    {{0.04f, -0.15f}, {0.09f, 0.35f}, {0.15f, 0.75f}, {0.24f, 1.15f}, 3.2f, 0.f, 0.7f, 0.50f, false},  // the dive on the left
-    {{0.10f, -0.15f}, {0.15f, 0.30f}, {0.21f, 0.80f}, {0.30f, 1.15f}, 3.6f, 0.f, 0.6f, 0.32f, false},  // its twin
-    {{0.58f, 1.15f}, {0.66f, 1.00f}, {0.70f, 0.40f}, {0.79f, 0.12f}, 4.1f, 0.f, 0.8f, 0.48f, true},    // rising by the icons, sparkle
-    {{0.30f, 1.10f}, {0.40f, 0.55f}, {0.48f, 0.95f}, {0.58f, 0.35f}, 5.3f, 0.f, 0.7f, 0.28f, false},   // an S in the middle
-};
+// Astral's header swirl: the iO Dark theme's swirl.png (astral.rip's forum header), white lines over the accent
+// gradient. Sized like the theme's "background-size: cover; background-position: center" (full width, middle slice),
+// drawn white at partial alpha (close to its mix-blend-mode: overlay on a mid-tone gradient). On open it fades in and
+// settles a few pixels into place.
+ID3D11ShaderResourceView* g_swirl = nullptr;
+bool g_swirlFailed = false;
 
-ImVec2 Bez(const Streak& s, float u, ImVec2 p, float w, float h) {
-    const float v = 1 - u;
-    const float x = v * v * v * s.a.x + 3 * v * v * u * s.b.x + 3 * v * u * u * s.c.x + u * u * u * s.d.x;
-    const float y = v * v * v * s.a.y + 3 * v * v * u * s.b.y + 3 * v * u * u * s.c.y + u * u * u * s.d.y;
-    return ImVec2(p.x + x * w, p.y + y * h);
-}
-
-void Sparkle(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {  // a four-point glint
-    const ImVec2 pts[8] = {{c.x, c.y - r}, {c.x + r * 0.22f, c.y - r * 0.22f}, {c.x + r, c.y}, {c.x + r * 0.22f, c.y + r * 0.22f},
-                           {c.x, c.y + r}, {c.x - r * 0.22f, c.y + r * 0.22f}, {c.x - r, c.y}, {c.x - r * 0.22f, c.y - r * 0.22f}};
-    dl->AddConcavePolyFilled(pts, 8, col);
+ID3D11ShaderResourceView* SwirlTexture() {
+    if (g_swirl || g_swirlFailed || !g_device) return g_swirl;
+    g_swirlFailed = true;
+    std::vector<unsigned char> rgba(static_cast<size_t>(kSwirlW) * kSwirlH * 4);
+    for (size_t i = 0; i < static_cast<size_t>(kSwirlW) * kSwirlH; ++i)
+        rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = 255, rgba[i * 4 + 3] = kSwirl[i];
+    D3D11_TEXTURE2D_DESC td{static_cast<UINT>(kSwirlW), static_cast<UINT>(kSwirlH), 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, {1, 0},
+                            D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE};
+    D3D11_SUBRESOURCE_DATA data{rgba.data(), static_cast<UINT>(kSwirlW * 4), 0};
+    ID3D11Texture2D* tex = nullptr;
+    if (SUCCEEDED(g_device->CreateTexture2D(&td, &data, &tex)) && tex) {
+        g_device->CreateShaderResourceView(tex, nullptr, &g_swirl);
+        tex->Release();
+    }
+    g_swirlFailed = !g_swirl;
+    return g_swirl;
 }
 
 void Swirl(ImDrawList* dl, ImVec2 p, float w, float h, float since, float t) {
     (void)t;
-    constexpr int N = 40;
-    for (const Streak& s : kStreaks) {
-        // the head runs from the path's start to past its end (so the tail leaves too), then waits and goes again
-        const float cycle = s.period, run = cycle * 0.75f;
-        const float local = std::fmod(std::max(0.f, since), cycle);  // on open all start together; their periods differ, so they drift apart
-        if (local > run) continue;
-        const float head = local / run * (1.f + s.tail);
-        const float t0 = std::max(0.f, head - s.tail), t1 = std::min(1.f, head);
-        if (t1 <= t0) continue;
-        ImVec2 prev = Bez(s, t0, p, w, h);
-        for (int i = 1; i <= N; ++i) {
-            const float u = t0 + (t1 - t0) * i / N;
-            const ImVec2 cur = Bez(s, u, p, w, h);
-            const float k = (u - (head - s.tail)) / s.tail;  // 0 at the tail end, 1 at the head
-            dl->AddLine(prev, cur, ui::col(ui::rgb(255, 255, 255), s.alpha * (0.2f + 0.8f * k)), ui::S(1.6f + 1.2f * k));
-            prev = cur;
-        }
-        if (s.sparkle && head <= 1.f) Sparkle(dl, prev, ui::S(4.5f), ui::col(ui::rgb(255, 255, 255), 0.9f));
-    }
+    ID3D11ShaderResourceView* tex = SwirlTexture();
+    if (!tex) return;
+    const float in = ui::ease(std::clamp(since / 0.45f, 0.f, 1.f));
+    const float shown = w / static_cast<float>(kSwirlW) * kSwirlH;  // the image's height at full width
+    const float v = std::clamp(h / shown, 0.f, 1.f);                 // the slice of it that fits the header
+    const float v0 = 0.5f - v * 0.5f, slide = (1 - in) * ui::S(18);
+    dl->AddImage(reinterpret_cast<ImTextureID>(tex), ImVec2(p.x + slide, p.y), ImVec2(p.x + w + slide, p.y + h), ImVec2(0, v0),
+                 ImVec2(1, v0 + v), ui::col(ui::rgb(255, 255, 255), 0.42f * in));
 }
 
 void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop before the tabs
@@ -641,6 +632,11 @@ double Get(int slot) { return Val(slot); }
 void SetUser(const std::string& name) {
     std::lock_guard lock(g_lock);
     g_user = name;
+}
+
+void ReleaseTextures() {
+    if (g_swirl) g_swirl->Release(), g_swirl = nullptr;
+    g_swirlFailed = false;
 }
 
 void SetDevice(ID3D11Device* device) {
