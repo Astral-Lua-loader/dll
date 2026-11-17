@@ -23,13 +23,13 @@ add_library(alm_minhook STATIC ${minhook_SOURCE_DIR}/src/buffer.c ${minhook_SOUR
     ${minhook_SOURCE_DIR}/src/trampoline.c ${minhook_SOURCE_DIR}/src/hde/hde32.c ${minhook_SOURCE_DIR}/src/hde/hde64.c)
 target_include_directories(alm_minhook PUBLIC ${minhook_SOURCE_DIR}/include)
 
-add_library(menu SHARED src/main.cpp src/Hooks.cpp src/Menu.cpp src/astral/ui.cpp)
+add_library(menu SHARED src/main.cpp src/Hooks.cpp src/Menu.cpp src/Avatar.cpp src/astral/ui.cpp)
 target_compile_definitions(menu PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_compile_options(menu PRIVATE /utf-8 /W4 /permissive- /wd4100)
-target_link_libraries(menu PRIVATE alm_imgui alm_minhook d3d11 dxgi)
+target_link_libraries(menu PRIVATE alm_imgui alm_minhook d3d11 dxgi urlmon windowscodecs ole32)
 
 # Offline look + logic check: WARP device renders every page to build/preview_*.bmp
-add_executable(preview tools/preview.cpp src/Menu.cpp src/astral/ui.cpp)
+add_executable(preview tools/preview.cpp src/Menu.cpp src/Avatar.cpp src/astral/ui.cpp)
 target_include_directories(preview PRIVATE src)
 target_compile_definitions(preview PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(preview PRIVATE alm_imgui d3d11 dxgi)
+target_link_libraries(preview PRIVATE alm_imgui d3d11 dxgi urlmon windowscodecs ole32)

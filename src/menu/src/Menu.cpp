@@ -19,6 +19,7 @@
 
 #include "astral/config.h"
 #include "astral/ui.h"
+#include "Avatar.h"
 
 namespace alm::menu {
 namespace {
@@ -164,6 +165,8 @@ float g_openAt = -10;  // when the menu last opened (header animation)    // Ast
 float g_pageT = 1;    // tab switch: fade in + 7 px rise
 float g_want = 300;   // the page's measured height (1080p px)
 bool g_drag = false;
+std::string g_user;                 // Astral's username (from the Lua)
+ID3D11Device* g_device = nullptr;   // for the avatar texture
 int g_cols = 2;
 float g_barX = -1, g_barW = 0;  // the active tab's underline
 std::unordered_map<int, ImRect> g_rowRects;  // slot -> its row on screen (the preview clicks by these)
@@ -289,13 +292,24 @@ float Tabs(ImDrawList* dl, ImVec2 p, float w) {  // page names, right-aligned on
     return x;
 }
 
-void Footer(ImDrawList* dl, ImVec2 p, float w) {
-    const float h = ui::S(FOOT);
+void Footer(ImDrawList* dl, ImVec2 p, float w) {  // Astral's: round profile picture, "name / User"
+    const float h = ui::S(FOOT), cy = p.y + h * 0.5f;
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui::col(ui::pal::group), ui::S(10), ImDrawFlags_RoundCornersBottom);
-    bool binds = false;
-    for (const Ctl& c : g_ctls) binds |= c.bindable;
-    const char* hint = g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : binds ? "Right-click to bind a key  \xC2\xB7  drag the header to move" : "Drag the header to move";
-    dl->AddText(ui::fSmall, ui::fSmall->FontSize, ImVec2(p.x + ui::S(14), std::floor(p.y + (h - ui::fSmall->FontSize) * 0.5f)), ui::col(ui::pal::textDim), hint);
+    const ImVec2 ac(p.x + ui::S(19), cy), r(ui::S(12), ui::S(12));
+    if (const ImTextureID av = avatar::Texture(g_device))
+        dl->AddImageRounded(av, ImVec2(ac.x - r.x, ac.y - r.y), ImVec2(ac.x + r.x, ac.y + r.y), ImVec2(0, 0), ImVec2(1, 1), ui::col(ui::rgb(255, 255, 255)), ui::S(12));
+    else
+        dl->AddCircleFilled(ac, ui::S(12), ui::col(ui::pal::field), 24);
+    const std::string name = g_user.empty() ? "User" : g_user;
+    ImFont* f = ui::fText;
+    const float ty = std::floor(cy - f->FontSize * 0.5f), nw = f->CalcTextSizeA(f->FontSize, FLT_MAX, 0, name.c_str()).x;
+    dl->AddText(f, f->FontSize, ImVec2(p.x + ui::S(38), ty), ui::col(ui::pal::textOn), name.c_str());
+    dl->AddText(f, f->FontSize, ImVec2(p.x + ui::S(38) + nw + ui::S(4), ty), ui::col(ui::pal::textDim), "/ User");
+    if (g_listen >= 0) {
+        const char* hint = "Press a key  \xC2\xB7  Esc clears";
+        const float hw = ui::fSmall->CalcTextSizeA(ui::fSmall->FontSize, FLT_MAX, 0, hint).x;
+        dl->AddText(ui::fSmall, ui::fSmall->FontSize, ImVec2(p.x + w - ui::S(14) - hw, std::floor(cy - ui::fSmall->FontSize * 0.5f)), ui::col(ui::pal::textDim), hint);
+    }
 }
 
 std::string Fmt(const Ctl& c) {  // a printf format for the slider's value: the step's decimals + the suffix
@@ -623,6 +637,16 @@ void SetSchema(const std::string& text) {
 }
 
 double Get(int slot) { return Val(slot); }
+
+void SetUser(const std::string& name) {
+    std::lock_guard lock(g_lock);
+    g_user = name;
+}
+
+void SetDevice(ID3D11Device* device) {
+    g_device = device;
+    avatar::Start();
+}
 
 void SetValue(int slot, double v) {  // Lua thread: no ImGui here
     if (slot >= 0 && slot < kSlots) g_vals[slot] = v;

@@ -11,6 +11,7 @@
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 
+#include "Avatar.h"
 #include "Menu.h"
 
 namespace {
@@ -124,6 +125,9 @@ int main() {
     alm::menu::SetConfigPath(cfg);
     alm::menu::SetSchema(kSchema);
     alm::menu::SetState(true, -1, -1, -1);
+    alm::menu::SetUser("Bogdanuq");
+    alm::menu::SetDevice(dev);
+    Sleep(3000);  // the Steam avatar downloads in the background
 
     for (int f = 0; f < 8; ++f) { Frames(6, 1200, 740); char n[32]; std::snprintf(n, sizeof(n), "open_%d.bmp", f); Shot(n); }  // the header animating in, every 0.1 s
     Frames(40, 1200, 740);
@@ -180,6 +184,7 @@ int main() {
     alm::menu::SetSchema(kSchema);  // a reload: values come back from the config
     Check(alm::menu::Get(3) == 1 && alm::menu::Get(5) == picked, "config round-trip");
 
+    alm::avatar::Stop();
     ImGui_ImplDX11_Shutdown();
     ImGui::DestroyContext();
     std::printf("%s\n", failed ? "FAILED" : "all passed");

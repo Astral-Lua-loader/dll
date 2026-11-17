@@ -10,6 +10,7 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include "Avatar.h"
 #include "Menu.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
@@ -68,6 +69,7 @@ bool InitImGui(IDXGISwapChain* swap) {
     menu::Fonts(desc.BufferDesc.Height >= 1440 ? desc.BufferDesc.Height / 1080.0f : 1.0f);
     ImGui_ImplWin32_Init(g_window);
     ImGui_ImplDX11_Init(g_device, g_context);
+    menu::SetDevice(g_device);
     g_wndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(g_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(WndProc)));
     return true;
 }
@@ -166,6 +168,7 @@ void Shutdown() {
     for (int i = 0; i < 50 && g_inside > 0; ++i) Sleep(10);  // a frame or message still in our code
     Sleep(50);
     menu::Save();
+    avatar::Stop();
     if (g_imgui) ImGui_ImplDX11_Shutdown(), ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     if (g_rtv) g_rtv->Release();

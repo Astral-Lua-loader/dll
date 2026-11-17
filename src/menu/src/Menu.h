@@ -3,6 +3,8 @@
 #pragma once
 #include <string>
 
+struct ID3D11Device;
+
 namespace alm::menu {
 
 // One control per line, tab separated (ui/menu.lua writes it):
@@ -15,6 +17,8 @@ namespace alm::menu {
 //   info   <slot> <name> <list slot>                       (the list's selected item)
 void SetSchema(const std::string& text);  // any thread; applied next frame, saved values loaded into it
 double Get(int slot);                     // any thread
+void SetUser(const std::string& name);    // any thread: the footer's username
+void SetDevice(ID3D11Device* device);     // render thread, once: starts the footer's Steam avatar
 void SetValue(int slot, double v);         // any thread (a list item's state from the Lua: 2 = failed)
 void SetState(bool open, int r, int g, int b);  // any thread: Astral's menu open, its accent (-1 unknown)
 
