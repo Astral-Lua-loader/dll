@@ -243,7 +243,7 @@ void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop 
         // twinkle: each star on its own slow beat; at the top of it the star brightens and swells for a moment (no halo rings)
         const float beat = 0.5f + 0.5f * std::sin(t * (0.9f + 0.23f * (i % 5)) + i * 2.399f);
         const float peak = std::pow(beat, 6.f);
-        const float pop = ui::ease(std::clamp((since - 0.04f * i) / 0.25f, 0.f, 1.f));  // on open the stars pop in left to right
+        const float pop = 1.f;  // no spawn animation on the stars (only the swirl animates on open)
         Star(dl, c, r * (0.6f + 0.4f * pop) * (1.f + 0.18f * peak), ui::col(ui::rgb(255, 255, 255), std::min(1.f, kDim[i] * (0.8f + 0.2f * beat) + 0.35f * peak) * pop), i * 0.37f);
     }
     dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
