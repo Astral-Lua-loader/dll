@@ -378,9 +378,7 @@ void InfoRow(Ctl& c) {
     p.y += ui::fText->FontSize + ui::S(14);
     ImGui::SetCursorScreenPos(p);
     ImGui::Dummy(ImVec2(0, 0));
-    if (st != 2 && ui::button(st == 1 ? "Turn off" : "Turn on")) Toggle(*list, i);
-    ImGui::Dummy(ImVec2(0, ui::S(6)));
-    const char* note = "Off pauses it and hides its menu items. Click a circle or double-click a name to switch.";
+    const char* note = st == 2 ? "Click its circle to try again." : "Click its circle (or double-click the name) to switch it. Off unloads it and hides its menu items.";
     const ImVec2 q = ImGui::GetCursorScreenPos();
     const ImVec2 ns = ui::fSmall->CalcTextSizeA(ui::fSmall->FontSize, FLT_MAX, wd, note);
     dl->AddText(ui::fSmall, ui::fSmall->FontSize, q, ui::col(ui::pal::textDim), note, nullptr, wd);
