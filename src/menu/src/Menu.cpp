@@ -180,31 +180,50 @@ void Star(ImDrawList* dl, ImVec2 c, float r, ImU32 color, float rot) {
     dl->AddConcavePolyFilled(pts, 10, color);
 }
 
-// the light swirl across the header: two ribbons along one wave. On open it sweeps in from the left, spreading out from
-// a thin line, then drifts slowly.
-ImVec2 SwirlAt(ImVec2 p, float w, float h, float u, float drift, float lane) {
-    const float x = p.x + w * (-0.05f + 1.1f * u);
-    const float y = p.y + h * (0.78f - 0.62f * u + 0.16f * std::sin(u * 7.2f + drift) + lane);
-    return ImVec2(x, y);
+// Astral's header streaks (from a recording of it): thin light trails running along curves like comets, the tail
+// fading out behind the head, one with a small sparkle at its head. Each has its own path, speed and start, so they
+// cross the header at different times; on open they all start at once and spread out.
+struct Streak { ImVec2 a, b, c, d; float period, offset, tail, alpha; bool sparkle; };
+const Streak kStreaks[] = {
+    {{0.04f, -0.15f}, {0.09f, 0.35f}, {0.15f, 0.75f}, {0.24f, 1.15f}, 3.2f, 0.f, 0.7f, 0.50f, false},  // the dive on the left
+    {{0.10f, -0.15f}, {0.15f, 0.30f}, {0.21f, 0.80f}, {0.30f, 1.15f}, 3.6f, 0.f, 0.6f, 0.32f, false},  // its twin
+    {{0.58f, 1.15f}, {0.66f, 1.00f}, {0.70f, 0.40f}, {0.79f, 0.12f}, 4.1f, 0.f, 0.8f, 0.48f, true},    // rising by the icons, sparkle
+    {{0.30f, 1.10f}, {0.40f, 0.55f}, {0.48f, 0.95f}, {0.58f, 0.35f}, 5.3f, 0.f, 0.7f, 0.28f, false},   // an S in the middle
+};
+
+ImVec2 Bez(const Streak& s, float u, ImVec2 p, float w, float h) {
+    const float v = 1 - u;
+    const float x = v * v * v * s.a.x + 3 * v * v * u * s.b.x + 3 * v * u * u * s.c.x + u * u * u * s.d.x;
+    const float y = v * v * v * s.a.y + 3 * v * v * u * s.b.y + 3 * v * u * u * s.c.y + u * u * u * s.d.y;
+    return ImVec2(p.x + x * w, p.y + y * h);
+}
+
+void Sparkle(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {  // a four-point glint
+    const ImVec2 pts[8] = {{c.x, c.y - r}, {c.x + r * 0.22f, c.y - r * 0.22f}, {c.x + r, c.y}, {c.x + r * 0.22f, c.y + r * 0.22f},
+                           {c.x, c.y + r}, {c.x - r * 0.22f, c.y + r * 0.22f}, {c.x - r, c.y}, {c.x - r * 0.22f, c.y - r * 0.22f}};
+    dl->AddConcavePolyFilled(pts, 8, col);
 }
 
 void Swirl(ImDrawList* dl, ImVec2 p, float w, float h, float since, float t) {
-    const float open = ui::ease(std::clamp(since / 0.7f, 0.f, 1.f));
-    const float spread = ui::ease(std::clamp((since - 0.15f) / 0.8f, 0.f, 1.f));
-    const float drift = t * 0.35f;
-    constexpr int N = 64;
-    const struct { float lane, width, alpha; } ribbons[] = {{0.f, 8.f, 0.20f}, {0.f, 1.8f, 0.42f}, {0.20f, 1.3f, 0.30f}};
-    for (const auto& rb : ribbons) {
-        const float lane = rb.lane * spread;
-        for (int i = 0; i < N; ++i) {
-            const float u0 = static_cast<float>(i) / N, u1 = static_cast<float>(i + 1) / N;
-            if (u1 > open) break;
-            const float ends = std::sin(IM_PI * (u0 + u1) * 0.5f);  // thin at both ends
-            const float head = std::clamp((open - u1) * 6.f, 0.f, 1.f);  // the sweeping front fades in
-            const float a = rb.alpha * ends * head;
-            dl->AddLine(SwirlAt(p, w, h, u0, drift, lane), SwirlAt(p, w, h, u1, drift, lane), ui::col(ui::rgb(255, 255, 255), a),
-                        ui::S(rb.width * (0.4f + 0.6f * spread) * (0.5f + 0.5f * ends)));
+    (void)t;
+    constexpr int N = 40;
+    for (const Streak& s : kStreaks) {
+        // the head runs from the path's start to past its end (so the tail leaves too), then waits and goes again
+        const float cycle = s.period, run = cycle * 0.75f;
+        const float local = std::fmod(std::max(0.f, since), cycle);  // on open all start together; their periods differ, so they drift apart
+        if (local > run) continue;
+        const float head = local / run * (1.f + s.tail);
+        const float t0 = std::max(0.f, head - s.tail), t1 = std::min(1.f, head);
+        if (t1 <= t0) continue;
+        ImVec2 prev = Bez(s, t0, p, w, h);
+        for (int i = 1; i <= N; ++i) {
+            const float u = t0 + (t1 - t0) * i / N;
+            const ImVec2 cur = Bez(s, u, p, w, h);
+            const float k = (u - (head - s.tail)) / s.tail;  // 0 at the tail end, 1 at the head
+            dl->AddLine(prev, cur, ui::col(ui::rgb(255, 255, 255), s.alpha * (0.2f + 0.8f * k)), ui::S(1.6f + 1.2f * k));
+            prev = cur;
         }
+        if (s.sparkle && head <= 1.f) Sparkle(dl, prev, ui::S(4.5f), ui::col(ui::rgb(255, 255, 255), 0.9f));
     }
 }
 
