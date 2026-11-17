@@ -150,6 +150,10 @@ int main() {
     Shot("preview_2.bmp");
     Check(alm::menu::RowAt(10, &x, &y) && alm::menu::Get(10) == 1, "visuals page shown, defaults");
 
+    Check(alm::menu::TabAt(2, &x, &y), "misc tab");
+    Click(x, y);  // a one-column page: the narrow window
+    Frames(30, 1200, 740);
+    Shot("preview_3.bmp");
     const double picked = alm::menu::Get(5);
     alm::menu::Save();
     alm::menu::SetSchema(kSchema);  // a reload: values come back from the config

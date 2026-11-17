@@ -173,7 +173,7 @@ void Star(ImDrawList* dl, ImVec2 c, float r, ImU32 color, float rot) {
     dl->AddConcavePolyFilled(pts, 10, color);
 }
 
-void Header(ImDrawList* dl, ImVec2 p, float w) {
+void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop before the tabs
     const float h = ui::S(HEAD);
     const int v0 = dl->VtxBuffer.Size;
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), IM_COL32_WHITE, ui::S(10), ImDrawFlags_RoundCornersTop);
@@ -182,6 +182,7 @@ void Header(ImDrawList* dl, ImVec2 p, float w) {
                                      {272, 10, 5}, {283, 23, 5}, {313, 19, 7.5f}, {334, 9, 5}, {348, 24, 5}, {367, 12, 7.5f},
                                      {397, 18, 5.5f}, {416, 9, 5}, {431, 23, 5}};
     for (int i = 0; i < 15; ++i)
+        if (p.x + ui::S(stars[i][0] + stars[i][2] * 1.2f) < starsEnd)
         Star(dl, ImVec2(p.x + ui::S(stars[i][0]), p.y + ui::S(stars[i][1])), ui::S(stars[i][2] * 1.2f), ui::col(ui::rgb(255, 255, 255), 0.95f), i * 0.37f);
     dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
 }
@@ -218,7 +219,7 @@ float Tabs(ImDrawList* dl, ImVec2 p, float w) {  // page names, right-aligned on
 void Footer(ImDrawList* dl, ImVec2 p, float w) {
     const float h = ui::S(FOOT);
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui::col(ui::pal::group), ui::S(10), ImDrawFlags_RoundCornersBottom);
-    const char* hint = g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : "Right-click a checkbox to bind a key  \xC2\xB7  drag the header to move";
+    const char* hint = g_listen >= 0 ? "Press a key to bind  \xC2\xB7  Esc clears" : "Right-click to bind a key  \xC2\xB7  drag the header to move";
     dl->AddText(ui::fSmall, ui::fSmall->FontSize, ImVec2(p.x + ui::S(14), std::floor(p.y + (h - ui::fSmall->FontSize) * 0.5f)), ui::col(ui::pal::textDim), hint);
 }
 
@@ -278,12 +279,12 @@ void Window() {
     const int pages = static_cast<int>(g_pages.size());
     g_tab = std::clamp(g_tab, 0, std::max(0, pages - 1));
     const float maxH = io.DisplaySize.y / S - 20;
-    const float H = std::min(HEAD + PADY + std::max(g_want, 200.f) + PADY + FOOT, maxH);
+    const float H = std::min(HEAD + PADY + std::max(g_want, 40.f) + PADY + FOOT, maxH);
     bool two = false;  // a page with groups in one column gets a one-column window, not a wide strip
     if (pages) for (const Group& g : g_pages[g_tab].groups) two |= g.col != 0;
     float tabsW = 0;
     for (const Page& pg : g_pages) tabsW += ui::fText->CalcTextSizeA(ui::fText->FontSize, FLT_MAX, 0, pg.name.c_str()).x / S + 22;
-    const float W = ui::anim(0x57D, two ? 720.f : std::max(400.f, 160.f + tabsW), 16);
+    const float W = ui::anim(0x57D, two ? 720.f : std::max(380.f, 230.f + tabsW), 16);
     g_cols = two ? 2 : 1;
     if (g_x < 0 || g_y < 0) g_x = std::max(0.f, (io.DisplaySize.x / S - W) / 2), g_y = std::max(0.f, (io.DisplaySize.y / S - H) / 2);
     g_x = std::clamp(g_x, 0.f, std::max(0.f, io.DisplaySize.x / S - W));
@@ -297,7 +298,7 @@ void Window() {
                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBringToFrontOnFocus);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(ImVec2(p.x, p.y + ui::S(HEAD - 1)), ImVec2(p.x + size.x, p.y + size.y - ui::S(FOOT - 1)), ui::col(ui::pal::bg));
-    Header(dl, p, size.x);
+    Header(dl, p, size.x, p.x + size.x - ui::S(16 + 9 + 12 + tabsW - 22));
     Footer(dl, ImVec2(p.x, p.y + size.y - ui::S(FOOT)), size.x);
     const float tabsAt = Tabs(dl, p, size.x);
 
