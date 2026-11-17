@@ -224,14 +224,11 @@ void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop 
         const float r = ui::S(stars[i][2] * 1.2f);
         if (p.x + ui::S(stars[i][0]) + r >= starsEnd) continue;
         const ImVec2 c(p.x + ui::S(stars[i][0]), p.y + ui::S(stars[i][1]));
-        // twinkle: each star on its own slow beat; at the top of it the star brightens and glows for a moment
+        // twinkle: each star on its own slow beat; at the top of it the star brightens and swells for a moment (no halo rings)
         const float beat = 0.5f + 0.5f * std::sin(t * (0.9f + 0.23f * (i % 5)) + i * 2.399f);
         const float peak = std::pow(beat, 6.f);
         const float pop = ui::ease(std::clamp((since - 0.04f * i) / 0.25f, 0.f, 1.f));  // on open the stars pop in left to right
-        if (peak > 0.02f)
-            for (int k = 3; k >= 1; --k)
-                dl->AddCircleFilled(c, r * (0.9f + 0.55f * k), ui::col(ui::rgb(255, 255, 255), 0.07f * peak * pop), 16);
-        Star(dl, c, r * (0.6f + 0.4f * pop) * (1.f + 0.12f * peak), ui::col(ui::rgb(255, 255, 255), (0.7f + 0.3f * std::max(beat * 0.6f, peak)) * pop), i * 0.37f);
+        Star(dl, c, r * (0.6f + 0.4f * pop) * (1.f + 0.18f * peak), ui::col(ui::rgb(255, 255, 255), (0.7f + 0.3f * std::max(beat * 0.6f, peak)) * pop), i * 0.37f);
     }
     dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
 }
