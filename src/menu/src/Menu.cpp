@@ -157,11 +157,12 @@ float g_openT = 0;    // Astral: opens in 4 frames, closes at once
 float g_pageT = 1;    // tab switch: fade in + 7 px rise
 float g_want = 300;   // the page's measured height (1080p px)
 bool g_drag = false;
+int g_cols = 2;
 float g_barX = -1, g_barW = 0;  // the active tab's underline
 std::unordered_map<int, ImRect> g_rowRects;  // slot -> its row on screen (the preview clicks by these)
 std::vector<ImRect> g_tabRects;
 
-constexpr float W = 720, HEAD = 35, FOOT = 35, PADX = 15, PADY = 14;
+constexpr float HEAD = 35, FOOT = 35, PADX = 15, PADY = 14;
 
 void Star(ImDrawList* dl, ImVec2 c, float r, ImU32 color, float rot) {
     ImVec2 pts[10];
@@ -277,7 +278,13 @@ void Window() {
     const int pages = static_cast<int>(g_pages.size());
     g_tab = std::clamp(g_tab, 0, std::max(0, pages - 1));
     const float maxH = io.DisplaySize.y / S - 20;
-    const float H = std::min(HEAD + PADY + std::max(g_want, 60.f) + PADY + FOOT, maxH);
+    const float H = std::min(HEAD + PADY + std::max(g_want, 200.f) + PADY + FOOT, maxH);
+    bool two = false;  // a page with groups in one column gets a one-column window, not a wide strip
+    if (pages) for (const Group& g : g_pages[g_tab].groups) two |= g.col != 0;
+    float tabsW = 0;
+    for (const Page& pg : g_pages) tabsW += ui::fText->CalcTextSizeA(ui::fText->FontSize, FLT_MAX, 0, pg.name.c_str()).x / S + 22;
+    const float W = ui::anim(0x57D, two ? 720.f : std::max(400.f, 160.f + tabsW), 16);
+    g_cols = two ? 2 : 1;
     if (g_x < 0 || g_y < 0) g_x = std::max(0.f, (io.DisplaySize.x / S - W) / 2), g_y = std::max(0.f, (io.DisplaySize.y / S - H) / 2);
     g_x = std::clamp(g_x, 0.f, std::max(0.f, io.DisplaySize.x / S - W));
     g_y = std::clamp(g_y, 0.f, std::max(0.f, io.DisplaySize.y / S - HEAD));
@@ -313,7 +320,8 @@ void Window() {
         float colH[2] = {0, 0};
         auto& groups = g_pages[g_tab].groups;
         for (int col = 0; col < 2; ++col) {
-            ui::column(col, 2);
+            if (col >= g_cols) break;
+            ui::column(col, g_cols);
             for (int gi = 0; gi < static_cast<int>(groups.size()); ++gi) {
                 Group& g = groups[gi];
                 if ((g.col ? 1 : 0) != col) continue;
