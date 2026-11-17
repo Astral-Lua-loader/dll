@@ -159,7 +159,8 @@ void SaveLocked() {
 
 // ---------------------------------------------------------------- look: astralmenu's widgets (astral/ui.*)
 float S = 1;          // scale (1 at 1080p)
-float g_openT = 0;    // Astral: opens in 4 frames, closes at once
+float g_openT = 0;
+float g_openAt = -10;  // when the menu last opened (header animation)    // Astral: opens in 4 frames, closes at once
 float g_pageT = 1;    // tab switch: fade in + 7 px rise
 float g_want = 300;   // the page's measured height (1080p px)
 bool g_drag = false;
@@ -179,6 +180,34 @@ void Star(ImDrawList* dl, ImVec2 c, float r, ImU32 color, float rot) {
     dl->AddConcavePolyFilled(pts, 10, color);
 }
 
+// the light swirl across the header: two ribbons along one wave. On open it sweeps in from the left, spreading out from
+// a thin line, then drifts slowly.
+ImVec2 SwirlAt(ImVec2 p, float w, float h, float u, float drift, float lane) {
+    const float x = p.x + w * (-0.05f + 1.1f * u);
+    const float y = p.y + h * (0.78f - 0.62f * u + 0.16f * std::sin(u * 7.2f + drift) + lane);
+    return ImVec2(x, y);
+}
+
+void Swirl(ImDrawList* dl, ImVec2 p, float w, float h, float since, float t) {
+    const float open = ui::ease(std::clamp(since / 0.7f, 0.f, 1.f));
+    const float spread = ui::ease(std::clamp((since - 0.15f) / 0.8f, 0.f, 1.f));
+    const float drift = t * 0.35f;
+    constexpr int N = 64;
+    const struct { float lane, width, alpha; } ribbons[] = {{0.f, 8.f, 0.20f}, {0.f, 1.8f, 0.42f}, {0.20f, 1.3f, 0.30f}};
+    for (const auto& rb : ribbons) {
+        const float lane = rb.lane * spread;
+        for (int i = 0; i < N; ++i) {
+            const float u0 = static_cast<float>(i) / N, u1 = static_cast<float>(i + 1) / N;
+            if (u1 > open) break;
+            const float ends = std::sin(IM_PI * (u0 + u1) * 0.5f);  // thin at both ends
+            const float head = std::clamp((open - u1) * 6.f, 0.f, 1.f);  // the sweeping front fades in
+            const float a = rb.alpha * ends * head;
+            dl->AddLine(SwirlAt(p, w, h, u0, drift, lane), SwirlAt(p, w, h, u1, drift, lane), ui::col(ui::rgb(255, 255, 255), a),
+                        ui::S(rb.width * (0.4f + 0.6f * spread) * (0.5f + 0.5f * ends)));
+        }
+    }
+}
+
 void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop before the tabs
     const float h = ui::S(HEAD);
     const int v0 = dl->VtxBuffer.Size;
@@ -187,9 +216,23 @@ void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop 
     static const float stars[][3] = {{85, 14, 5}, {111, 10, 5}, {139, 19, 7.5f}, {170, 13, 5.5f}, {214, 9, 5}, {237, 16, 7.5f},
                                      {272, 10, 5}, {283, 23, 5}, {313, 19, 7.5f}, {334, 9, 5}, {348, 24, 5}, {367, 12, 7.5f},
                                      {397, 18, 5.5f}, {416, 9, 5}, {431, 23, 5}};
-    for (int i = 0; i < 15; ++i)
-        if (p.x + ui::S(stars[i][0] + stars[i][2] * 1.2f) < starsEnd)
-        Star(dl, ImVec2(p.x + ui::S(stars[i][0]), p.y + ui::S(stars[i][1])), ui::S(stars[i][2] * 1.2f), ui::col(ui::rgb(255, 255, 255), 0.95f), i * 0.37f);
+    const float t = static_cast<float>(ImGui::GetTime()), since = t - g_openAt;
+    dl->PushClipRect(p, ImVec2(p.x + w, p.y + h), true);
+    Swirl(dl, p, w, h, since, t);
+    dl->PopClipRect();
+    for (int i = 0; i < 15; ++i) {
+        const float r = ui::S(stars[i][2] * 1.2f);
+        if (p.x + ui::S(stars[i][0]) + r >= starsEnd) continue;
+        const ImVec2 c(p.x + ui::S(stars[i][0]), p.y + ui::S(stars[i][1]));
+        // twinkle: each star on its own slow beat; at the top of it the star brightens and glows for a moment
+        const float beat = 0.5f + 0.5f * std::sin(t * (0.9f + 0.23f * (i % 5)) + i * 2.399f);
+        const float peak = std::pow(beat, 6.f);
+        const float pop = ui::ease(std::clamp((since - 0.04f * i) / 0.25f, 0.f, 1.f));  // on open the stars pop in left to right
+        if (peak > 0.02f)
+            for (int k = 3; k >= 1; --k)
+                dl->AddCircleFilled(c, r * (0.9f + 0.55f * k), ui::col(ui::rgb(255, 255, 255), 0.07f * peak * pop), 16);
+        Star(dl, c, r * (0.6f + 0.4f * pop) * (1.f + 0.12f * peak), ui::col(ui::rgb(255, 255, 255), (0.7f + 0.3f * std::max(beat * 0.6f, peak)) * pop), i * 0.37f);
+    }
     dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
 }
 
@@ -578,6 +621,7 @@ void Frame() {
         g_openT = 0, g_drag = false;
         if (g_listen >= 0) g_listen = -1;
     } else {
+        if (g_openT == 0) g_openAt = static_cast<float>(ImGui::GetTime());
         g_openT = std::min(1.f, g_openT + ImGui::GetIO().DeltaTime / 0.067f);
         Window();
     }

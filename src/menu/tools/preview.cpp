@@ -125,6 +125,7 @@ int main() {
     alm::menu::SetSchema(kSchema);
     alm::menu::SetState(true, -1, -1, -1);
 
+    for (int f = 0; f < 8; ++f) { Frames(6, 1200, 740); char n[32]; std::snprintf(n, sizeof(n), "open_%d.bmp", f); Shot(n); }  // the header animating in, every 0.1 s
     Frames(40, 1200, 740);
     Check(alm::menu::Get(3) == 0 && alm::menu::Get(4) == 10 && alm::menu::Get(8) == 2.5, "defaults");
     float x = 0, y = 0;
