@@ -252,14 +252,21 @@ void Header(ImDrawList* dl, ImVec2 p, float w, float starsEnd) {  // stars stop 
     dl->AddText(ui::fHeader, ui::fHeader->FontSize, ImVec2(p.x + ui::S(12), p.y + (h - ui::fHeader->FontSize) * 0.5f), ui::col(ui::rgb(255, 255, 255)), "Astral");
 }
 
+// a page's tab: Astral's icon for the pages it has one for (Font Awesome, embedded in astral/fonts.h), else its name
+std::pair<ImFont*, const char*> TabLabel(const std::string& name) {
+    if (name == "Scripts") return {ui::fIcons, "\xef\x84\xa1"};  // U+F121 </>, Astral's scripting tab icon
+    return {ui::fText, name.c_str()};
+}
+
 float Tabs(ImDrawList* dl, ImVec2 p, float w) {  // page names, right-aligned on the header; returns where they start
     const int pages = static_cast<int>(g_pages.size());
     const float h = ui::S(HEAD);
     g_tabRects.assign(pages, ImRect());
     float x = p.x + w - ui::S(16), barX = 0, barW = 0;
     for (int i = pages - 1; i >= 0; --i) {
-        const char* name = g_pages[i].name.c_str();
-        const float tw = ui::fText->CalcTextSizeA(ui::fText->FontSize, FLT_MAX, 0, name).x;
+        const auto [font, name] = TabLabel(g_pages[i].name);
+        const bool icon = font == ui::fIcons;
+        const float tw = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, name).x;
         x -= tw;
         const ImRect bb(ImVec2(x - ui::S(9), p.y), ImVec2(x + tw + ui::S(9), p.y + h));
         g_tabRects[i] = bb;
@@ -268,9 +275,10 @@ float Tabs(ImDrawList* dl, ImVec2 p, float w) {  // page names, right-aligned on
         if (ImGui::InvisibleButton("##tab", bb.GetSize()) && g_tab != i) g_tab = i, g_pageT = 0, MarkDirty();
         const float on = ui::anim(ImGui::GetItemID(), g_tab == i ? 1.f : 0.f), hv = ui::anim(ImGui::GetItemID() + 1, ImGui::IsItemHovered() ? 1.f : 0.f);
         ImGui::PopID();
-        dl->AddText(ui::fText, ui::fText->FontSize, ImVec2(std::floor(x), std::floor(p.y + (h - ui::fText->FontSize) * 0.5f)),
-                    ui::col(ImVec4(1, 1, 1, 0.62f + 0.38f * std::max(on, hv))), name);
-        if (g_tab == i) barX = x, barW = tw;
+        const float rest = icon ? 0.78f : 0.62f;  // Astral's icons: 78% at rest, full when active or hovered
+        dl->AddText(font, font->FontSize, ImVec2(std::floor(x), std::floor(p.y + (h - font->FontSize) * 0.5f)),
+                    ui::col(ImVec4(1, 1, 1, rest + (1 - rest) * std::max(on, hv))), name);
+        if (g_tab == i) barX = x, barW = icon ? 0.f : tw;  // no underline under an icon (Astral has none)
         x -= ui::S(22);
     }
     if (pages) {
@@ -483,7 +491,10 @@ void Window() {
     bool two = false;  // a page with groups in one column gets a one-column window, not a wide strip
     if (pages) for (const Group& g : g_pages[g_tab].groups) two |= g.col != 0;
     float tabsW = 0;
-    for (const Page& pg : g_pages) tabsW += ui::fText->CalcTextSizeA(ui::fText->FontSize, FLT_MAX, 0, pg.name.c_str()).x / S + 22;
+    for (const Page& pg : g_pages) {
+        const auto [font, label] = TabLabel(pg.name);
+        tabsW += font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, label).x / S + 22;
+    }
     const float W = ui::anim(0x57D, two ? 600.f : std::max(380.f, 230.f + tabsW), 16);
     g_cols = two ? 2 : 1;
     if (g_x < 0 || g_y < 0) g_x = std::max(0.f, (io.DisplaySize.x / S - W) / 2), g_y = std::max(0.f, (io.DisplaySize.y / S - H) / 2);
